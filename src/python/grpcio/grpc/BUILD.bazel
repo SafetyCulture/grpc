@@ -2,7 +2,7 @@ load("@grpc_python_dependencies//:requirements.bzl", "requirement")
 
 package(default_visibility = ["//visibility:public"])
 
-py_binary(
+py_library(
     name = "grpcio",
     srcs = ["__init__.py"],
     deps = [
@@ -12,17 +12,18 @@ py_binary(
         ":channel",
         ":interceptor",
         ":server",
+        ":compression",
         "//src/python/grpcio/grpc/_cython:cygrpc",
-        "//src/python/grpcio/grpc/beta",
         "//src/python/grpcio/grpc/experimental",
         "//src/python/grpcio/grpc/framework",
-        requirement('enum34'),
         requirement('six'),
-    ],
+    ] + select({
+        "//conditions:default": [requirement('enum34'),],
+        "//:python3": [],
+    }),
     data = [
         "//:grpc",
     ],
-    main = "__init__.py",
     imports = ["../",],
 )
 
@@ -32,11 +33,17 @@ py_library(
 )
 
 py_library(
+    name = "compression",
+    srcs = ["_compression.py"],
+)
+
+py_library(
     name = "channel",
     srcs = ["_channel.py"],
     deps = [
         ":common",
         ":grpcio_metadata",
+        ":compression",
     ],
 )
 
@@ -68,6 +75,7 @@ py_library(
     srcs = ["_server.py"],
     deps = [
         ":common",
+        ":compression",
         ":interceptor",
     ],
 )

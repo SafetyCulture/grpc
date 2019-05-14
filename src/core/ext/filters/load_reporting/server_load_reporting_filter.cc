@@ -25,17 +25,17 @@
 #include <grpc/support/string_util.h>
 
 #include "src/core/ext/filters/client_channel/parse_address.h"
-#include "src/core/ext/filters/client_channel/uri_parser.h"
 #include "src/core/ext/filters/load_reporting/registered_opencensus_objects.h"
 #include "src/core/ext/filters/load_reporting/server_load_reporting_filter.h"
 #include "src/core/lib/channel/channel_args.h"
 #include "src/core/lib/channel/context.h"
 #include "src/core/lib/iomgr/resolve_address.h"
-#include "src/core/lib/iomgr/sockaddr_posix.h"
+#include "src/core/lib/iomgr/sockaddr.h"
 #include "src/core/lib/iomgr/socket_utils.h"
 #include "src/core/lib/security/context/security_context.h"
 #include "src/core/lib/slice/slice_internal.h"
 #include "src/core/lib/surface/call.h"
+#include "src/core/lib/uri/uri_parser.h"
 
 namespace grpc {
 
@@ -162,9 +162,10 @@ void ServerLoadReportingCallData::GetCensusSafeClientIpString(
   } else if (addr->sa_family == GRPC_AF_INET6) {
     grpc_sockaddr_in6* addr6 = reinterpret_cast<grpc_sockaddr_in6*>(addr);
     *client_ip_string = static_cast<char*>(gpr_malloc(32 + 1));
-    for (size_t i = 0; i < 16; ++i) {
-      snprintf(*client_ip_string + i * 2, 2 + 1, "%02x",
-               addr6->sin6_addr.__in6_u.__u6_addr8[i]);
+    uint32_t* addr6_next_long = reinterpret_cast<uint32_t*>(&addr6->sin6_addr);
+    for (size_t i = 0; i < 4; ++i) {
+      snprintf(*client_ip_string + 8 * i, 8 + 1, "%08x",
+               grpc_ntohl(*addr6_next_long++));
     }
     *size = 32;
   } else {
@@ -341,12 +342,11 @@ bool MaybeAddServerLoadReportingFilter(const grpc_channel_args& args) {
 // time if we build with the filter target.
 struct ServerLoadReportingFilterStaticRegistrar {
   ServerLoadReportingFilterStaticRegistrar() {
-    static std::atomic_bool registered{false};
-    if (registered) return;
+    static grpc_core::Atomic<bool> registered{false};
+    if (registered.Load(grpc_core::MemoryOrder::ACQUIRE)) return;
     RegisterChannelFilter<ServerLoadReportingChannelData,
                           ServerLoadReportingCallData>(
-        "server_load_reporting", GRPC_SERVER_CHANNEL,
-        GRPC_CHANNEL_INIT_PRIORITY_LOW, true,
+        "server_load_reporting", GRPC_SERVER_CHANNEL, INT_MAX,
         MaybeAddServerLoadReportingFilter);
     // Access measures to ensure they are initialized. Otherwise, we can't
     // create any valid view before the first RPC.
@@ -356,7 +356,7 @@ struct ServerLoadReportingFilterStaticRegistrar {
     ::grpc::load_reporter::MeasureEndBytesReceived();
     ::grpc::load_reporter::MeasureEndLatencyMs();
     ::grpc::load_reporter::MeasureOtherCallMetric();
-    registered = true;
+    registered.Store(true, grpc_core::MemoryOrder::RELEASE);
   }
 } server_load_reporting_filter_static_registrar;
 

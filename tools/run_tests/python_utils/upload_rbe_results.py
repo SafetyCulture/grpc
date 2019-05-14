@@ -40,13 +40,14 @@ _RESULTS_SCHEMA = [
     ('test_case', 'STRING', 'Name of test case'),
     ('result', 'STRING', 'Test or build result'),
     ('timestamp', 'TIMESTAMP', 'Timestamp of test run'),
+    ('duration', 'FLOAT', 'Duration of the test run'),
 ]
 _TABLE_ID = 'rbe_test_results'
 
 
 def _get_api_key():
     """Returns string with API key to access ResultStore.
-	Intended to be used in Kokoro envrionment."""
+	Intended to be used in Kokoro environment."""
     api_key_directory = os.getenv('KOKORO_GFILE_DIR')
     api_key_file = os.path.join(api_key_directory, 'resultstore_api_key')
     assert os.path.isfile(api_key_file), 'Must add --api_key arg if not on ' \
@@ -57,13 +58,23 @@ def _get_api_key():
 
 def _get_invocation_id():
     """Returns String of Bazel invocation ID. Intended to be used in
-	Kokoro envirionment."""
+	Kokoro environment."""
     bazel_id_directory = os.getenv('KOKORO_ARTIFACTS_DIR')
     bazel_id_file = os.path.join(bazel_id_directory, 'bazel_invocation_ids')
     assert os.path.isfile(bazel_id_file), 'bazel_invocation_ids file, written ' \
-     'by bazel_wrapper.py, expected but not found.'
+     'by RBE initialization script, expected but not found.'
     with open(bazel_id_file, 'r') as f:
         return f.read().replace('\n', '')
+
+
+def _parse_test_duration(duration_str):
+    """Parse test duration string in '123.567s' format"""
+    try:
+        if duration_str.endswith('s'):
+            duration_str = duration_str[:-1]
+        return float(duration_str)
+    except:
+        return None
 
 
 def _upload_results_to_bq(rows):
@@ -111,7 +122,7 @@ def _get_resultstore_data(api_key, invocation_id):
     while True:
         req = urllib2.Request(
             url=
-            'https://resultstore.googleapis.com/v2/invocations/%s/targets/-/configuredTargets/-/actions?key=%s&pageToken=%s'
+            'https://resultstore.googleapis.com/v2/invocations/%s/targets/-/configuredTargets/-/actions?key=%s&pageToken=%s&fields=next_page_token,actions.id,actions.status_attributes,actions.timing,actions.test_action'
             % (invocation_id, api_key, page_token),
             headers={
                 'Content-Type': 'application/json'
@@ -135,6 +146,8 @@ if __name__ == "__main__":
     invocation_id = args.invocation_id or _get_invocation_id()
     resultstore_actions = _get_resultstore_data(api_key, invocation_id)
 
+    # google.devtools.resultstore.v2.Action schema:
+    # https://github.com/googleapis/googleapis/blob/master/google/devtools/resultstore/v2/action.proto
     bq_rows = []
     for index, action in enumerate(resultstore_actions):
         # Filter out non-test related data, such as build results.
@@ -174,6 +187,10 @@ if __name__ == "__main__":
                 'startTime':
                 resultstore_actions[index - 1]['timing']['startTime']
             }
+        elif 'testSuite' not in action['testAction']:
+            continue
+        elif 'tests' not in action['testAction']['testSuite']:
+            continue
         else:
             test_cases = action['testAction']['testSuite']['tests'][0][
                 'testSuite']['tests']
@@ -205,6 +222,8 @@ if __name__ == "__main__":
                         result,
                         'timestamp':
                         action['timing']['startTime'],
+                        'duration':
+                        _parse_test_duration(action['timing']['duration']),
                     }
                 })
             except Exception as e:

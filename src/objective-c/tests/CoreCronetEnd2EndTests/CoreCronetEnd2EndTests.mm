@@ -37,11 +37,11 @@
 #include <grpc/support/log.h>
 
 #include "src/core/lib/channel/channel_args.h"
-#include "src/core/lib/gpr/env.h"
 #include "src/core/lib/gpr/host_port.h"
 #include "src/core/lib/gpr/string.h"
 #include "src/core/lib/gpr/tmpfile.h"
 #include "src/core/lib/security/credentials/credentials.h"
+#include "src/core/lib/security/security_connector/ssl_utils.h"
 #include "test/core/end2end/data/ssl_test_data.h"
 #include "test/core/util/port.h"
 #include "test/core/util/test_config.h"
@@ -81,13 +81,7 @@ static void cronet_init_client_secure_fullstack(grpc_end2end_test_fixture *f,
                                                 grpc_channel_args *client_args,
                                                 stream_engine *cronetEngine) {
   fullstack_secure_fixture_data *ffd = (fullstack_secure_fixture_data *)f->fixture_data;
-  grpc_arg arg;
-  arg.key = const_cast<char *>(GRPC_ARG_DISABLE_CLIENT_AUTHORITY_FILTER);
-  arg.type = GRPC_ARG_INTEGER;
-  arg.value.integer = 1;
-  client_args = grpc_channel_args_copy_and_add(client_args, &arg, 1);
   f->client = grpc_cronet_secure_channel_create(cronetEngine, ffd->localaddr, client_args, NULL);
-  grpc_channel_args_destroy(client_args);
   GPR_ASSERT(f->client != NULL);
 }
 
@@ -178,7 +172,7 @@ static char *roots_filename;
   GPR_ASSERT(roots_file != NULL);
   GPR_ASSERT(fwrite(test_root_cert, 1, roots_size, roots_file) == roots_size);
   fclose(roots_file);
-  gpr_setenv(GRPC_DEFAULT_SSL_ROOTS_FILE_PATH_ENV_VAR, roots_filename);
+  GPR_GLOBAL_CONFIG_SET(grpc_default_ssl_roots_file_path, roots_filename);
 
   grpc_init();
 
@@ -322,10 +316,6 @@ static char *roots_filename;
 
 - (void)testNegativeDeadline {
   [self testIndividualCase:(char *)"negative_deadline"];
-}
-
-- (void)testNetworkStatusChange {
-  [self testIndividualCase:(char *)"network_status_change"];
 }
 
 - (void)testNoOp {

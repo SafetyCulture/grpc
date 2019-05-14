@@ -41,12 +41,12 @@ typedef struct connected_channel_channel_data {
 typedef struct {
   grpc_closure closure;
   grpc_closure* original_closure;
-  grpc_call_combiner* call_combiner;
+  grpc_core::CallCombiner* call_combiner;
   const char* reason;
 } callback_state;
 
 typedef struct connected_channel_call_data {
-  grpc_call_combiner* call_combiner;
+  grpc_core::CallCombiner* call_combiner;
   // Closures used for returning results on the call combiner.
   callback_state on_complete[6];  // Max number of pending batches.
   callback_state recv_initial_metadata_ready;
@@ -228,8 +228,8 @@ static void bind_transport(grpc_channel_stack* channel_stack,
       grpc_transport_stream_size(static_cast<grpc_transport*>(t));
 }
 
-bool grpc_append_connected_filter(grpc_channel_stack_builder* builder,
-                                  void* arg_must_be_null) {
+bool grpc_add_connected_filter(grpc_channel_stack_builder* builder,
+                               void* arg_must_be_null) {
   GPR_ASSERT(arg_must_be_null == nullptr);
   grpc_transport* t = grpc_channel_stack_builder_get_transport(builder);
   GPR_ASSERT(t != nullptr);

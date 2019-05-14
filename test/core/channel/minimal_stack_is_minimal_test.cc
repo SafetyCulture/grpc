@@ -56,7 +56,7 @@ static int check_stack(const char* file, int line, const char* transport_name,
 #define CHECK_STACK(...) check_stack(__FILE__, __LINE__, __VA_ARGS__)
 
 int main(int argc, char** argv) {
-  grpc_test_init(argc, argv);
+  grpc::testing::TestEnvironment env(argc, argv);
   grpc_init();
   int errors = 0;
 
@@ -85,21 +85,21 @@ int main(int argc, char** argv) {
 
   // tests with a default stack
   errors +=
-      CHECK_STACK("unknown", nullptr, GRPC_CLIENT_DIRECT_CHANNEL, "deadline",
-                  "authority", "message_size", "connected", NULL);
+      CHECK_STACK("unknown", nullptr, GRPC_CLIENT_DIRECT_CHANNEL, "authority",
+                  "message_size", "deadline", "connected", NULL);
   errors += CHECK_STACK("unknown", nullptr, GRPC_CLIENT_SUBCHANNEL, "authority",
                         "message_size", "connected", NULL);
   errors += CHECK_STACK("unknown", nullptr, GRPC_SERVER_CHANNEL, "server",
-                        "deadline", "message_size", "connected", NULL);
+                        "message_size", "deadline", "connected", NULL);
   errors += CHECK_STACK("chttp2", nullptr, GRPC_CLIENT_DIRECT_CHANNEL,
-                        "deadline", "authority", "message_size",
-                        "message_compress", "http-client", "connected", NULL);
+                        "authority", "message_size", "deadline", "http-client",
+                        "message_compress", "connected", NULL);
   errors += CHECK_STACK("chttp2", nullptr, GRPC_CLIENT_SUBCHANNEL, "authority",
-                        "message_size", "message_compress", "http-client",
+                        "message_size", "http-client", "message_compress",
                         "connected", NULL);
   errors += CHECK_STACK("chttp2", nullptr, GRPC_SERVER_CHANNEL, "server",
-                        "deadline", "message_size", "message_compress",
-                        "http-server", "connected", NULL);
+                        "message_size", "deadline", "http-server",
+                        "message_compress", "connected", NULL);
   errors += CHECK_STACK(nullptr, nullptr, GRPC_CLIENT_CHANNEL, "client-channel",
                         NULL);
 

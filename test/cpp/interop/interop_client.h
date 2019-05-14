@@ -76,6 +76,8 @@ class InteropClient {
   // languages
   bool DoChannelSoakTest(int32_t soak_iterations);
   bool DoRpcSoakTest(int32_t soak_iterations);
+  bool DoLongLivedChannelTest(int32_t soak_iterations,
+                              int32_t iteration_interval);
 
   // Auth tests.
   // username is a string containing the user email
@@ -87,6 +89,8 @@ class InteropClient {
                          const grpc::string& oauth_scope);
   // username is a string containing the user email
   bool DoPerRpcCreds(const grpc::string& json_key);
+  // default_service_account is the GCE default service account email
+  bool DoGoogleDefaultCredentials(const grpc::string& default_service_account);
 
  private:
   class ServiceStub {

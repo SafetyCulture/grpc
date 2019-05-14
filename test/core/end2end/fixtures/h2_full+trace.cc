@@ -33,7 +33,7 @@
 #include "src/core/ext/filters/http/server/http_server_filter.h"
 #include "src/core/ext/transport/chttp2/transport/chttp2_transport.h"
 #include "src/core/lib/channel/connected_channel.h"
-#include "src/core/lib/gpr/env.h"
+#include "src/core/lib/debug/trace.h"
 #include "src/core/lib/gpr/host_port.h"
 #include "src/core/lib/surface/channel.h"
 #include "src/core/lib/surface/server.h"
@@ -105,7 +105,7 @@ int main(int argc, char** argv) {
 
   /* force tracing on, with a value to force many
      code paths in trace.c to be taken */
-  gpr_setenv("GRPC_TRACE", "doesnt-exist,http,all");
+  GPR_GLOBAL_CONFIG_SET(grpc_trace, "doesnt-exist,http,all");
 
 #ifdef GRPC_POSIX_SOCKET
   g_fixture_slowdown_factor = isatty(STDOUT_FILENO) ? 10 : 1;
@@ -113,7 +113,16 @@ int main(int argc, char** argv) {
   g_fixture_slowdown_factor = 10;
 #endif
 
-  grpc_test_init(argc, argv);
+#ifdef GPR_WINDOWS
+  /* on Windows, writing logs to stderr is very slow
+     when stderr is redirected to a disk file.
+     The "trace" tests fixtures generates large amount
+     of logs, so setting a buffer for stderr prevents certain
+     test cases from timing out. */
+  setvbuf(stderr, NULL, _IOLBF, 1024);
+#endif
+
+  grpc::testing::TestEnvironment env(argc, argv);
   grpc_end2end_tests_pre_init();
   grpc_init();
 

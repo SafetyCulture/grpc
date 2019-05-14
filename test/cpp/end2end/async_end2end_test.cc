@@ -32,7 +32,7 @@
 #include <grpcpp/server_builder.h>
 #include <grpcpp/server_context.h>
 
-#include "src/core/lib/gpr/env.h"
+#include "src/core/ext/filters/client_channel/backup_poller.h"
 #include "src/core/lib/gpr/tls.h"
 #include "src/core/lib/iomgr/port.h"
 #include "src/proto/grpc/health/v1/health.grpc.pb.h"
@@ -42,6 +42,10 @@
 #include "test/core/util/test_config.h"
 #include "test/cpp/util/string_ref_helper.h"
 #include "test/cpp/util/test_credentials_provider.h"
+
+#ifdef GRPC_POSIX_SOCKET
+#include "src/core/lib/iomgr/ev_posix.h"
+#endif  // GRPC_POSIX_SOCKET
 
 #include <gtest/gtest.h>
 
@@ -178,7 +182,7 @@ class Verifier {
           EXPECT_EQ(it2->second.ok, ok);
         }
       } else {
-        gpr_log(GPR_ERROR, "Unexpected tag: %p", tag);
+        gpr_log(GPR_ERROR, "Unexpected tag: %p", got_tag);
         abort();
       }
     }
@@ -294,9 +298,9 @@ class AsyncEnd2endTest : public ::testing::TestWithParam<TestScenario> {
     auto channel_creds = GetCredentialsProvider()->GetChannelCredentials(
         GetParam().credentials_type, &args);
     std::shared_ptr<Channel> channel =
-        !(GetParam().inproc)
-            ? CreateCustomChannel(server_address_.str(), channel_creds, args)
-            : server_->InProcessChannel(args);
+        !(GetParam().inproc) ? ::grpc::CreateCustomChannel(
+                                   server_address_.str(), channel_creds, args)
+                             : server_->InProcessChannel(args);
     stub_ = grpc::testing::EchoTestService::NewStub(channel);
   }
 
@@ -358,13 +362,14 @@ TEST_P(AsyncEnd2endTest, ReconnectChannel) {
     return;
   }
   int poller_slowdown_factor = 1;
+#ifdef GRPC_POSIX_SOCKET
   // It needs 2 pollset_works to reconnect the channel with polling engine
   // "poll"
-  char* s = gpr_getenv("GRPC_POLL_STRATEGY");
-  if (s != nullptr && 0 == strcmp(s, "poll")) {
+  grpc_core::UniquePtr<char> poller = GPR_GLOBAL_CONFIG_GET(grpc_poll_strategy);
+  if (0 == strcmp(poller.get(), "poll")) {
     poller_slowdown_factor = 2;
   }
-  gpr_free(s);
+#endif  // GRPC_POSIX_SOCKET
   ResetStub();
   SendRpc(1);
   server_->Shutdown();
@@ -953,6 +958,114 @@ TEST_P(AsyncEnd2endTest, ServerInitialMetadataRpc) {
   EXPECT_TRUE(recv_status.ok());
 }
 
+// 1 ping, 2 pongs.
+TEST_P(AsyncEnd2endTest, ServerInitialMetadataServerStreaming) {
+  ResetStub();
+  EchoRequest send_request;
+  EchoRequest recv_request;
+  EchoResponse send_response;
+  EchoResponse recv_response;
+  Status recv_status;
+  ClientContext cli_ctx;
+  ServerContext srv_ctx;
+  ServerAsyncWriter<EchoResponse> srv_stream(&srv_ctx);
+
+  std::pair<::grpc::string, ::grpc::string> meta1("key1", "val1");
+  std::pair<::grpc::string, ::grpc::string> meta2("key2", "val2");
+
+  std::unique_ptr<ClientAsyncReader<EchoResponse>> cli_stream(
+      stub_->AsyncResponseStream(&cli_ctx, send_request, cq_.get(), tag(1)));
+  cli_stream->ReadInitialMetadata(tag(11));
+  service_->RequestResponseStream(&srv_ctx, &recv_request, &srv_stream,
+                                  cq_.get(), cq_.get(), tag(2));
+
+  Verifier().Expect(1, true).Expect(2, true).Verify(cq_.get());
+
+  srv_ctx.AddInitialMetadata(meta1.first, meta1.second);
+  srv_ctx.AddInitialMetadata(meta2.first, meta2.second);
+  srv_stream.SendInitialMetadata(tag(10));
+  Verifier().Expect(10, true).Expect(11, true).Verify(cq_.get());
+  auto server_initial_metadata = cli_ctx.GetServerInitialMetadata();
+  EXPECT_EQ(meta1.second,
+            ToString(server_initial_metadata.find(meta1.first)->second));
+  EXPECT_EQ(meta2.second,
+            ToString(server_initial_metadata.find(meta2.first)->second));
+  EXPECT_EQ(static_cast<size_t>(2), server_initial_metadata.size());
+
+  srv_stream.Write(send_response, tag(3));
+
+  cli_stream->Read(&recv_response, tag(4));
+  Verifier().Expect(3, true).Expect(4, true).Verify(cq_.get());
+
+  srv_stream.Write(send_response, tag(5));
+  cli_stream->Read(&recv_response, tag(6));
+  Verifier().Expect(5, true).Expect(6, true).Verify(cq_.get());
+
+  srv_stream.Finish(Status::OK, tag(7));
+  cli_stream->Read(&recv_response, tag(8));
+  Verifier().Expect(7, true).Expect(8, false).Verify(cq_.get());
+
+  cli_stream->Finish(&recv_status, tag(9));
+  Verifier().Expect(9, true).Verify(cq_.get());
+
+  EXPECT_TRUE(recv_status.ok());
+}
+
+// 1 ping, 2 pongs.
+// Test for server initial metadata being sent implicitly
+TEST_P(AsyncEnd2endTest, ServerInitialMetadataServerStreamingImplicit) {
+  ResetStub();
+  EchoRequest send_request;
+  EchoRequest recv_request;
+  EchoResponse send_response;
+  EchoResponse recv_response;
+  Status recv_status;
+  ClientContext cli_ctx;
+  ServerContext srv_ctx;
+  ServerAsyncWriter<EchoResponse> srv_stream(&srv_ctx);
+
+  send_request.set_message(GetParam().message_content);
+  std::pair<::grpc::string, ::grpc::string> meta1("key1", "val1");
+  std::pair<::grpc::string, ::grpc::string> meta2("key2", "val2");
+
+  std::unique_ptr<ClientAsyncReader<EchoResponse>> cli_stream(
+      stub_->AsyncResponseStream(&cli_ctx, send_request, cq_.get(), tag(1)));
+  service_->RequestResponseStream(&srv_ctx, &recv_request, &srv_stream,
+                                  cq_.get(), cq_.get(), tag(2));
+
+  Verifier().Expect(1, true).Expect(2, true).Verify(cq_.get());
+  EXPECT_EQ(send_request.message(), recv_request.message());
+
+  srv_ctx.AddInitialMetadata(meta1.first, meta1.second);
+  srv_ctx.AddInitialMetadata(meta2.first, meta2.second);
+  send_response.set_message(recv_request.message());
+  srv_stream.Write(send_response, tag(3));
+
+  cli_stream->Read(&recv_response, tag(4));
+  Verifier().Expect(3, true).Expect(4, true).Verify(cq_.get());
+  EXPECT_EQ(send_response.message(), recv_response.message());
+
+  auto server_initial_metadata = cli_ctx.GetServerInitialMetadata();
+  EXPECT_EQ(meta1.second,
+            ToString(server_initial_metadata.find(meta1.first)->second));
+  EXPECT_EQ(meta2.second,
+            ToString(server_initial_metadata.find(meta2.first)->second));
+  EXPECT_EQ(static_cast<size_t>(2), server_initial_metadata.size());
+
+  srv_stream.Write(send_response, tag(5));
+  cli_stream->Read(&recv_response, tag(6));
+  Verifier().Expect(5, true).Expect(6, true).Verify(cq_.get());
+
+  srv_stream.Finish(Status::OK, tag(7));
+  cli_stream->Read(&recv_response, tag(8));
+  Verifier().Expect(7, true).Expect(8, false).Verify(cq_.get());
+
+  cli_stream->Finish(&recv_status, tag(9));
+  Verifier().Expect(9, true).Verify(cq_.get());
+
+  EXPECT_TRUE(recv_status.ok());
+}
+
 TEST_P(AsyncEnd2endTest, ServerTrailingMetadataRpc) {
   ResetStub();
 
@@ -1147,9 +1260,9 @@ TEST_P(AsyncEnd2endTest, UnimplementedRpc) {
   const auto& channel_creds = GetCredentialsProvider()->GetChannelCredentials(
       GetParam().credentials_type, &args);
   std::shared_ptr<Channel> channel =
-      !(GetParam().inproc)
-          ? CreateCustomChannel(server_address_.str(), channel_creds, args)
-          : server_->InProcessChannel(args);
+      !(GetParam().inproc) ? ::grpc::CreateCustomChannel(server_address_.str(),
+                                                         channel_creds, args)
+                           : server_->InProcessChannel(args);
   std::unique_ptr<grpc::testing::UnimplementedEchoService::Stub> stub;
   stub = grpc::testing::UnimplementedEchoService::NewStub(channel);
   EchoRequest send_request;
@@ -1775,8 +1888,8 @@ INSTANTIATE_TEST_CASE_P(AsyncEnd2endServerTryCancel,
 int main(int argc, char** argv) {
   // Change the backup poll interval from 5s to 100ms to speed up the
   // ReconnectChannel test
-  gpr_setenv("GRPC_CLIENT_CHANNEL_BACKUP_POLL_INTERVAL_MS", "100");
-  grpc_test_init(argc, argv);
+  GPR_GLOBAL_CONFIG_SET(grpc_client_channel_backup_poll_interval_ms, 100);
+  grpc::testing::TestEnvironment env(argc, argv);
   ::testing::InitGoogleTest(&argc, argv);
   int ret = RUN_ALL_TESTS();
   return ret;

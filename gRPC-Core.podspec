@@ -94,7 +94,7 @@ Pod::Spec.new do |s|
     'CLANG_WARN_STRICT_PROTOTYPES' => 'NO',
   }
 
-  s.default_subspecs = 'Interface', 'Implementation'
+  s.default_subspecs = 'Interface', 'Implementation', 'Cronet-Interface', 'Cronet-Implementation'
   s.compiler_flags = '-DGRPC_ARES=0', '-DPB_FIELD_32BIT'
   s.libraries = 'c++'
 

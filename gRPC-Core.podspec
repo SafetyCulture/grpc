@@ -38,7 +38,7 @@ Pod::Spec.new do |s|
   # which was released in Cocoapods v1.2.0.
   s.cocoapods_version = '>= 1.2.0'
 
-  s.ios.deployment_target = '7.0'
+  s.ios.deployment_target = '11.0'
   s.osx.deployment_target = '10.9'
   s.tvos.deployment_target = '10.0'
   s.watchos.deployment_target = '4.0'
@@ -84,7 +84,7 @@ Pod::Spec.new do |s|
   src_root = '$(PODS_ROOT)/gRPC-Core'
   s.pod_target_xcconfig = {
     'GRPC_SRC_ROOT' => src_root,
-    'HEADER_SEARCH_PATHS' => '"$(inherited)" "$(GRPC_SRC_ROOT)/include"',
+    'HEADER_SEARCH_PATHS' => '"$(inherited)" "$(GRPC_SRC_ROOT)/include" "$(PODS_ROOT)/Headers/Private/gRPC-Core/grpc"',
     'USER_HEADER_SEARCH_PATHS' => '"$(GRPC_SRC_ROOT)"',
     # If we don't set these two settings, `include/grpc/support/time.h` and
     # `src/core/lib/gpr/string.h` shadow the system `<time.h>` and `<string.h>`, breaking the

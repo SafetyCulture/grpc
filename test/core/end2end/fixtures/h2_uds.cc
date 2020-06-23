@@ -31,7 +31,6 @@
 #include "src/core/ext/filters/http/server/http_server_filter.h"
 #include "src/core/ext/transport/chttp2/transport/chttp2_transport.h"
 #include "src/core/lib/channel/connected_channel.h"
-#include "src/core/lib/gpr/host_port.h"
 #include "src/core/lib/gpr/string.h"
 #include "src/core/lib/surface/channel.h"
 #include "src/core/lib/surface/server.h"
@@ -45,7 +44,7 @@ typedef struct fullstack_fixture_data {
 static int unique = 1;
 
 static grpc_end2end_test_fixture chttp2_create_fixture_fullstack(
-    grpc_channel_args* client_args, grpc_channel_args* server_args) {
+    grpc_channel_args* /*client_args*/, grpc_channel_args* /*server_args*/) {
   grpc_end2end_test_fixture f;
   fullstack_fixture_data* ffd = static_cast<fullstack_fixture_data*>(
       gpr_malloc(sizeof(fullstack_fixture_data)));

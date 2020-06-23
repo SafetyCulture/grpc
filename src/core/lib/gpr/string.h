@@ -32,9 +32,14 @@
 #define GPR_DUMP_HEX 0x00000001
 #define GPR_DUMP_ASCII 0x00000002
 
-/* Converts array buf, of length len, into a C string  according to the flags.
+/* Converts array buf, of length len, into a C string according to the flags.
    Result should be freed with gpr_free() */
 char* gpr_dump(const char* buf, size_t len, uint32_t flags);
+/* Converts array buf, of length len, into a C string according to the flags.
+   The length of the returned buffer is stored in out_len.
+   Result should be freed with gpr_free() */
+char* gpr_dump_return_len(const char* buf, size_t len, uint32_t flags,
+                          size_t* out_len);
 
 /* Parses an array of bytes into an integer (base 10). Returns 1 on success,
    0 on failure. */
@@ -91,25 +96,10 @@ void gpr_string_split(const char* input, const char* sep, char*** strs,
    0, 3, 6 or 9 fractional digits. */
 char* gpr_format_timespec(gpr_timespec);
 
-/* A vector of strings... for building up a final string one piece at a time */
-typedef struct {
-  char** strs;
-  size_t count;
-  size_t capacity;
-} gpr_strvec;
-
-/* Initialize/destroy */
-void gpr_strvec_init(gpr_strvec* strs);
-void gpr_strvec_destroy(gpr_strvec* strs);
-/* Add a string to a strvec, takes ownership of the string */
-void gpr_strvec_add(gpr_strvec* strs, char* add);
-/* Return a joined string with all added substrings, optionally setting
-   total_length as per gpr_strjoin */
-char* gpr_strvec_flatten(gpr_strvec* strs, size_t* total_length);
-
 /** Case insensitive string comparison... return <0 if lower(a)<lower(b), ==0 if
     lower(a)==lower(b), >0 if lower(a)>lower(b) */
 int gpr_stricmp(const char* a, const char* b);
+int gpr_strincmp(const char* a, const char* b, size_t n);
 
 void* gpr_memrchr(const void* s, int c, size_t n);
 

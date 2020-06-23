@@ -4,9 +4,10 @@ This is an internal rule used by cc_grpc_library, and shouldn't be used
 directly.
 """
 
+load("@rules_proto//proto:defs.bzl", "ProtoInfo")
 load(
     "//bazel:protobuf.bzl",
-    "get_include_protoc_args",
+    "get_include_directory",
     "get_plugin_args",
     "get_proto_root",
     "proto_path_to_generated_filename",
@@ -41,11 +42,11 @@ def _join_directories(directories):
 
 def generate_cc_impl(ctx):
     """Implementation of the generate_cc rule."""
-    protos = [f for src in ctx.attr.srcs for f in src.proto.check_deps_sources]
+    protos = [f for src in ctx.attr.srcs for f in src[ProtoInfo].check_deps_sources.to_list()]
     includes = [
         f
         for src in ctx.attr.srcs
-        for f in src.proto.transitive_imports
+        for f in src[ProtoInfo].transitive_imports.to_list()
     ]
     outs = []
     proto_root = get_proto_root(
@@ -107,7 +108,10 @@ def generate_cc_impl(ctx):
         arguments += ["--cpp_out=" + ",".join(ctx.attr.flags) + ":" + dir_out]
         tools = []
 
-    arguments += get_include_protoc_args(includes)
+    arguments += [
+        "--proto_path={}".format(get_include_directory(i))
+        for i in includes
+    ]
 
     # Include the output directory so that protoc puts the generated code in the
     # right directory.
@@ -128,7 +132,7 @@ def generate_cc_impl(ctx):
             arguments += ["-I{0}".format(f + "/../..")]
             well_known_proto_files = [
                 f
-                for f in ctx.attr.well_known_protos.files
+                for f in ctx.attr.well_known_protos.files.to_list()
             ]
 
     ctx.actions.run(
@@ -146,7 +150,7 @@ _generate_cc = rule(
         "srcs": attr.label_list(
             mandatory = True,
             allow_empty = False,
-            providers = ["proto"],
+            providers = [ProtoInfo],
         ),
         "plugin": attr.label(
             executable = True,

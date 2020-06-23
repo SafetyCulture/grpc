@@ -26,10 +26,12 @@ grpc_cc_test(
     ],
     external_deps = [
         "gtest",
-        "gmock",
         "opencensus-stats-test",
+        "opencensus-tags",
+        "opencensus-with-tag-map",
     ],
     language = "C++",
+    tags = ["no_windows"],  # TODO(jtattermusch): fix test on windows
     deps = [
         "//:grpc++",
         "//:grpc_opencensus_plugin",

@@ -17,6 +17,9 @@ import os
 
 import setuptools
 
+_PACKAGE_PATH = os.path.realpath(os.path.dirname(__file__))
+_README_PATH = os.path.join(_PACKAGE_PATH, 'README.rst')
+
 # Ensure we're in the proper directory whether or not we're being used by pip.
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
@@ -49,6 +52,8 @@ CLASSIFIERS = [
     'Programming Language :: Python :: 3.4',
     'Programming Language :: Python :: 3.5',
     'Programming Language :: Python :: 3.6',
+    'Programming Language :: Python :: 3.7',
+    'Programming Language :: Python :: 3.8',
     'License :: OSI Approved :: Apache Software License',
 ]
 
@@ -64,8 +69,8 @@ INSTALL_REQUIRES = (
 try:
     import health_commands as _health_commands
     # we are in the build environment, otherwise the above import fails
-    SETUP_REQUIRES = (
-        'grpcio-tools=={version}'.format(version=grpc_version.VERSION),)
+    SETUP_REQUIRES = ('grpcio-tools=={version}'.format(
+        version=grpc_version.VERSION),)
     COMMAND_CLASS = {
         # Run preprocess from the repository *before* doing any packaging!
         'preprocess': _health_commands.Preprocess,
@@ -79,17 +84,17 @@ except ImportError:
         'build_package_protos': _NoOpCommand,
     }
 
-setuptools.setup(
-    name='grpcio-health-checking',
-    version=grpc_version.VERSION,
-    description='Standard Health Checking Service for gRPC',
-    author='The gRPC Authors',
-    author_email='grpc-io@googlegroups.com',
-    url='https://grpc.io',
-    license='Apache License 2.0',
-    classifiers=CLASSIFIERS,
-    package_dir=PACKAGE_DIRECTORIES,
-    packages=setuptools.find_packages('.'),
-    install_requires=INSTALL_REQUIRES,
-    setup_requires=SETUP_REQUIRES,
-    cmdclass=COMMAND_CLASS)
+setuptools.setup(name='grpcio-health-checking',
+                 version=grpc_version.VERSION,
+                 description='Standard Health Checking Service for gRPC',
+                 long_description=open(_README_PATH, 'r').read(),
+                 author='The gRPC Authors',
+                 author_email='grpc-io@googlegroups.com',
+                 url='https://grpc.io',
+                 license='Apache License 2.0',
+                 classifiers=CLASSIFIERS,
+                 package_dir=PACKAGE_DIRECTORIES,
+                 packages=setuptools.find_packages('.'),
+                 install_requires=INSTALL_REQUIRES,
+                 setup_requires=SETUP_REQUIRES,
+                 cmdclass=COMMAND_CLASS)

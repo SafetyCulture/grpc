@@ -35,9 +35,9 @@ grpc_cc_test(
     srcs = ["load_reporter_test.cc"],
     external_deps = [
         "gtest",
-        "gmock",
         "opencensus-stats-test",
     ],
+    tags = ["no_windows"],
     deps = [
         "//:gpr",
         "//:grpc",
@@ -45,7 +45,6 @@ grpc_cc_test(
         "//:lb_server_load_reporting_filter",
         "//test/core/util:grpc_test_util",
     ],
-    tags = ["no_windows"],
 )
 
 grpc_cc_test(

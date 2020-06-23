@@ -170,7 +170,7 @@ static VALUE grpc_rb_call_cancel(VALUE self) {
 /* TODO: expose this as part of the surface API if needed.
  * This is meant for internal usage by the "write thread" of grpc-ruby
  * client-side bidi calls. It provides a way for the background write-thread
- * to propogate failures to the main read-thread and give the user an error
+ * to propagate failures to the main read-thread and give the user an error
  * message. */
 static VALUE grpc_rb_call_cancel_with_status(VALUE self, VALUE status_code,
                                              VALUE details) {
@@ -620,6 +620,7 @@ typedef struct run_batch_stack {
   int recv_cancelled;
   grpc_status_code recv_status;
   grpc_slice recv_status_details;
+  const char* recv_status_debug_error_string;
   unsigned write_flag;
   grpc_slice send_status_details;
 } run_batch_stack;
@@ -729,6 +730,8 @@ static void grpc_run_batch_stack_fill_ops(run_batch_stack* st, VALUE ops_hash) {
             &st->recv_status;
         st->ops[st->op_num].data.recv_status_on_client.status_details =
             &st->recv_status_details;
+        st->ops[st->op_num].data.recv_status_on_client.error_string =
+            &st->recv_status_debug_error_string;
         break;
       case GRPC_OP_RECV_CLOSE_ON_SERVER:
         st->ops[st->op_num].data.recv_close_on_server.cancelled =
@@ -780,7 +783,12 @@ static VALUE grpc_run_batch_stack_build_result(run_batch_stack* st) {
                 (GRPC_SLICE_START_PTR(st->recv_status_details) == NULL
                      ? Qnil
                      : grpc_rb_slice_to_ruby_string(st->recv_status_details)),
-                grpc_rb_md_ary_to_h(&st->recv_trailing_metadata), NULL));
+                grpc_rb_md_ary_to_h(&st->recv_trailing_metadata),
+                st->recv_status_debug_error_string == NULL
+                    ? Qnil
+                    : rb_str_new_cstr(st->recv_status_debug_error_string),
+                NULL));
+        gpr_free((void*)st->recv_status_debug_error_string);
         break;
       case GRPC_OP_RECV_CLOSE_ON_SERVER:
         rb_struct_aset(result, sym_send_close, Qtrue);

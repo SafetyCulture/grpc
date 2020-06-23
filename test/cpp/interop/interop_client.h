@@ -69,13 +69,19 @@ class InteropClient {
   bool DoUnimplementedMethod();
   bool DoUnimplementedService();
   bool DoCacheableUnary();
+  // all requests are sent to one server despite multiple servers are resolved
+  bool DoPickFirstUnary();
 
   // The following interop test are not yet part of the interop spec, and are
   // not implemented cross-language. They are considered experimental for now,
   // but at some point in the future, might be codified and implemented in all
   // languages
-  bool DoChannelSoakTest(int32_t soak_iterations);
-  bool DoRpcSoakTest(int32_t soak_iterations);
+  bool DoChannelSoakTest(int32_t soak_iterations, int32_t max_failures,
+                         int64_t max_acceptable_per_iteration_latency_ms,
+                         int32_t overall_timeout_seconds);
+  bool DoRpcSoakTest(int32_t soak_iterations, int32_t max_failures,
+                     int64_t max_acceptable_per_iteration_latency_ms,
+                     int32_t overall_timeout_seconds);
   bool DoLongLivedChannelTest(int32_t soak_iterations,
                               int32_t iteration_interval);
 
@@ -125,6 +131,16 @@ class InteropClient {
   bool AssertStatusCode(const Status& s, StatusCode expected_code,
                         const grpc::string& optional_debug_string);
   bool TransientFailureOrAbort();
+
+  std::tuple<bool, int32_t, std::string> PerformOneSoakTestIteration(
+      const bool reset_channel,
+      const int32_t max_acceptable_per_iteration_latency_ms);
+
+  void PerformSoakTest(const bool reset_channel_per_iteration,
+                       const int32_t soak_iterations,
+                       const int32_t max_failures,
+                       const int32_t max_acceptable_per_iteration_latency_ms,
+                       const int32_t overall_timeout_seconds);
 
   ServiceStub serviceStub_;
   /// If true, abort() is not called for transient failures

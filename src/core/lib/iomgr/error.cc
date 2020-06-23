@@ -73,6 +73,8 @@ static const char* error_int_name(grpc_error_ints key) {
       return "limit";
     case GRPC_ERROR_INT_OCCURRED_DURING_WRITE:
       return "occurred_during_write";
+    case GRPC_ERROR_INT_CHANNEL_CONNECTIVITY_STATE:
+      return "channel_connectivity_state";
     case GRPC_ERROR_INT_MAX:
       GPR_UNREACHABLE_CODE(return "unknown");
   }
@@ -444,16 +446,19 @@ grpc_error* grpc_error_set_int(grpc_error* src, grpc_error_ints which,
   return new_err;
 }
 
-typedef struct {
+struct special_error_status_map {
   grpc_status_code code;
   const char* msg;
-} special_error_status_map;
-static const special_error_status_map error_status_map[] = {
-    {GRPC_STATUS_OK, ""},                               // GRPC_ERROR_NONE
-    {GRPC_STATUS_INVALID_ARGUMENT, ""},                 // GRPC_ERROR_RESERVED_1
-    {GRPC_STATUS_RESOURCE_EXHAUSTED, "Out of memory"},  // GRPC_ERROR_OOM
-    {GRPC_STATUS_INVALID_ARGUMENT, ""},                 // GRPC_ERROR_RESERVED_2
-    {GRPC_STATUS_CANCELLED, "Cancelled"},               // GRPC_ERROR_CANCELLED
+  size_t len;
+};
+const special_error_status_map error_status_map[] = {
+    {GRPC_STATUS_OK, "", 0},                // GRPC_ERROR_NONE
+    {GRPC_STATUS_INVALID_ARGUMENT, "", 0},  // GRPC_ERROR_RESERVED_1
+    {GRPC_STATUS_RESOURCE_EXHAUSTED, "Out of memory",
+     strlen("Out of memory")},              // GRPC_ERROR_OOM
+    {GRPC_STATUS_INVALID_ARGUMENT, "", 0},  // GRPC_ERROR_RESERVED_2
+    {GRPC_STATUS_CANCELLED, "Cancelled",
+     strlen("Cancelled")},  // GRPC_ERROR_CANCELLED
 };
 
 bool grpc_error_get_int(grpc_error* err, grpc_error_ints which, intptr_t* p) {
@@ -483,8 +488,12 @@ bool grpc_error_get_str(grpc_error* err, grpc_error_strs which,
                         grpc_slice* str) {
   if (grpc_error_is_special(err)) {
     if (which != GRPC_ERROR_STR_GRPC_MESSAGE) return false;
-    *str = grpc_slice_from_static_string(
-        error_status_map[reinterpret_cast<size_t>(err)].msg);
+    const special_error_status_map& msg =
+        error_status_map[reinterpret_cast<size_t>(err)];
+    str->refcount = &grpc_core::kNoopRefcount;
+    str->data.refcounted.bytes =
+        reinterpret_cast<uint8_t*>(const_cast<char*>(msg.msg));
+    str->data.refcounted.length = msg.len;
     return true;
   }
   uint8_t slot = err->strs[which];
@@ -522,17 +531,15 @@ static const char* no_error_string = "\"No Error\"";
 static const char* oom_error_string = "\"Out of memory\"";
 static const char* cancelled_error_string = "\"Cancelled\"";
 
-typedef struct {
+struct kv_pair {
   char* key;
   char* value;
-} kv_pair;
-
-typedef struct {
+};
+struct kv_pairs {
   kv_pair* kvs;
   size_t num_kvs;
   size_t cap_kvs;
-} kv_pairs;
-
+};
 static void append_chr(char c, char** s, size_t* sz, size_t* cap) {
   if (*sz == *cap) {
     *cap = GPR_MAX(8, 3 * *cap / 2);
@@ -795,9 +802,9 @@ grpc_error* grpc_wsa_error(const char* file, int line, int err,
 }
 #endif
 
-bool grpc_log_if_error(const char* what, grpc_error* error, const char* file,
-                       int line) {
-  if (error == GRPC_ERROR_NONE) return true;
+bool grpc_log_error(const char* what, grpc_error* error, const char* file,
+                    int line) {
+  GPR_DEBUG_ASSERT(error != GRPC_ERROR_NONE);
   const char* msg = grpc_error_string(error);
   gpr_log(file, line, GPR_LOG_SEVERITY_ERROR, "%s: %s", what, msg);
   GRPC_ERROR_UNREF(error);

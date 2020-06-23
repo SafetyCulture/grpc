@@ -19,17 +19,24 @@
 #include "src/core/lib/iomgr/port.h"
 
 // This test won't work except with posix sockets enabled
-#ifdef GRPC_POSIX_SOCKET
+#ifdef GRPC_POSIX_SOCKET_EV
 
 #include <string.h>
+
+#include <vector>
+
+#include "absl/strings/str_format.h"
+#include "absl/strings/str_join.h"
+#include "absl/strings/str_split.h"
+#include "absl/strings/string_view.h"
 
 #include <grpc/grpc.h>
 #include <grpc/support/alloc.h>
 #include <grpc/support/log.h>
 #include <grpc/support/string_util.h>
 
-#include "src/core/lib/gpr/host_port.h"
 #include "src/core/lib/gpr/string.h"
+#include "src/core/lib/gprpp/host_port.h"
 #include "src/core/lib/iomgr/error.h"
 #include "src/core/lib/iomgr/resolve_address.h"
 #include "src/core/lib/iomgr/sockaddr_utils.h"
@@ -51,8 +58,6 @@ static void drain_cq(grpc_completion_queue* cq) {
   } while (ev.type != GRPC_QUEUE_SHUTDOWN);
 }
 
-static void do_nothing(void* ignored) {}
-
 static void log_resolved_addrs(const char* label, const char* hostname) {
   grpc_resolved_addresses* res = nullptr;
   grpc_error* error = grpc_blocking_resolve_address(hostname, "80", &res);
@@ -70,8 +75,6 @@ static void log_resolved_addrs(const char* label, const char* hostname) {
 
 void test_connect(const char* server_host, const char* client_host, int port,
                   int expect_ok) {
-  char* client_hostport;
-  char* server_hostport;
   grpc_channel* client;
   grpc_server* server;
   grpc_completion_queue* cq;
@@ -99,7 +102,7 @@ void test_connect(const char* server_host, const char* client_host, int port,
     picked_port = 1;
   }
 
-  gpr_join_host_port(&server_hostport, server_host, port);
+  std::string server_hostport = grpc_core::JoinHostPort(server_host, port);
 
   grpc_metadata_array_init(&initial_metadata_recv);
   grpc_metadata_array_init(&trailing_metadata_recv);
@@ -111,7 +114,7 @@ void test_connect(const char* server_host, const char* client_host, int port,
   server = grpc_server_create(nullptr, nullptr);
   grpc_server_register_completion_queue(server, cq, nullptr);
   GPR_ASSERT((got_port = grpc_server_add_insecure_http2_port(
-                  server, server_hostport)) > 0);
+                  server, server_hostport.c_str())) > 0);
   if (port == 0) {
     port = got_port;
   } else {
@@ -121,44 +124,28 @@ void test_connect(const char* server_host, const char* client_host, int port,
   cqv = cq_verifier_create(cq);
 
   /* Create client. */
+  std::string client_hostport;
   if (client_host[0] == 'i') {
     /* for ipv4:/ipv6: addresses, concatenate the port to each of the parts */
-    size_t i;
-    grpc_slice uri_slice;
-    grpc_slice_buffer uri_parts;
-    char** hosts_with_port;
-
-    uri_slice = grpc_slice_new(const_cast<char*>(client_host),
-                               strlen(client_host), do_nothing);
-    grpc_slice_buffer_init(&uri_parts);
-    grpc_slice_split(uri_slice, ",", &uri_parts);
-    hosts_with_port =
-        static_cast<char**>(gpr_malloc(sizeof(char*) * uri_parts.count));
-    for (i = 0; i < uri_parts.count; i++) {
-      char* uri_part_str = grpc_slice_to_c_string(uri_parts.slices[i]);
-      gpr_asprintf(&hosts_with_port[i], "%s:%d", uri_part_str, port);
-      gpr_free(uri_part_str);
+    std::vector<absl::string_view> uri_parts =
+        absl::StrSplit(client_host, ",", absl::SkipEmpty());
+    std::vector<std::string> hosts_with_port;
+    hosts_with_port.reserve(uri_parts.size());
+    for (const absl::string_view& uri_part : uri_parts) {
+      hosts_with_port.push_back(absl::StrFormat("%s:%d", uri_part, port));
     }
-    client_hostport = gpr_strjoin_sep((const char**)hosts_with_port,
-                                      uri_parts.count, ",", nullptr);
-    for (i = 0; i < uri_parts.count; i++) {
-      gpr_free(hosts_with_port[i]);
-    }
-    gpr_free(hosts_with_port);
-    grpc_slice_buffer_destroy(&uri_parts);
-    grpc_slice_unref(uri_slice);
+    client_hostport = absl::StrJoin(hosts_with_port, ",");
   } else {
-    gpr_join_host_port(&client_hostport, client_host, port);
+    client_hostport = grpc_core::JoinHostPort(client_host, port);
   }
-  client = grpc_insecure_channel_create(client_hostport, nullptr, nullptr);
+  client =
+      grpc_insecure_channel_create(client_hostport.c_str(), nullptr, nullptr);
 
   gpr_log(GPR_INFO, "Testing with server=%s client=%s (expecting %s)",
-          server_hostport, client_hostport, expect_ok ? "success" : "failure");
+          server_hostport.c_str(), client_hostport.c_str(),
+          expect_ok ? "success" : "failure");
   log_resolved_addrs("server resolved addr", server_host);
   log_resolved_addrs("client resolved addr", client_host);
-
-  gpr_free(client_hostport);
-  gpr_free(server_hostport);
 
   if (expect_ok) {
     /* Normal deadline, shouldn't be reached. */
@@ -245,7 +232,7 @@ void test_connect(const char* server_host, const char* client_host, int port,
     GPR_ASSERT(0 == grpc_slice_str_cmp(call_details.method, "/foo"));
     GPR_ASSERT(0 ==
                grpc_slice_str_cmp(call_details.host, "foo.test.google.fr"));
-    GPR_ASSERT(was_cancelled == 1);
+    GPR_ASSERT(was_cancelled == 0);
 
     grpc_call_unref(s);
   } else {
@@ -371,8 +358,8 @@ int main(int argc, char** argv) {
   return 0;
 }
 
-#else /* GRPC_POSIX_SOCKET */
+#else /* GRPC_POSIX_SOCKET_EV */
 
 int main(int argc, char** argv) { return 1; }
 
-#endif /* GRPC_POSIX_SOCKET */
+#endif /* GRPC_POSIX_SOCKET_EV */

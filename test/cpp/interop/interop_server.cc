@@ -31,7 +31,6 @@
 #include <grpcpp/server_context.h>
 
 #include "src/core/lib/gpr/string.h"
-#include "src/core/lib/transport/byte_stream.h"
 #include "src/proto/grpc/testing/empty.pb.h"
 #include "src/proto/grpc/testing/messages.pb.h"
 #include "src/proto/grpc/testing/test.grpc.pb.h"
@@ -118,7 +117,7 @@ bool CheckExpectedCompression(const ServerContext& context,
               "Expected compression but got uncompressed request from client.");
       return false;
     }
-    if (!(inspector.GetMessageFlags() & GRPC_WRITE_INTERNAL_COMPRESS)) {
+    if (!(inspector.WasCompressed())) {
       gpr_log(GPR_ERROR,
               "Failure: Requested compression in a compressable request, but "
               "compression bit in message flags not set.");
@@ -126,7 +125,7 @@ bool CheckExpectedCompression(const ServerContext& context,
     }
   } else {
     // Didn't expect compression -> make sure the request is uncompressed
-    if (inspector.GetMessageFlags() & GRPC_WRITE_INTERNAL_COMPRESS) {
+    if (inspector.WasCompressed()) {
       gpr_log(GPR_ERROR,
               "Failure: Didn't requested compression, but compression bit in "
               "message flags set.");
@@ -138,15 +137,16 @@ bool CheckExpectedCompression(const ServerContext& context,
 
 class TestServiceImpl : public TestService::Service {
  public:
-  Status EmptyCall(ServerContext* context, const grpc::testing::Empty* request,
-                   grpc::testing::Empty* response) {
+  Status EmptyCall(ServerContext* context,
+                   const grpc::testing::Empty* /*request*/,
+                   grpc::testing::Empty* /*response*/) {
     MaybeEchoMetadata(context);
     return Status::OK;
   }
 
   // Response contains current timestamp. We ignore everything in the request.
   Status CacheableUnaryCall(ServerContext* context,
-                            const SimpleRequest* request,
+                            const SimpleRequest* /*request*/,
                             SimpleResponse* response) {
     gpr_timespec ts = gpr_now(GPR_CLOCK_PRECISE);
     std::string timestamp = std::to_string((long long unsigned)ts.tv_nsec);
@@ -287,7 +287,7 @@ class TestServiceImpl : public TestService::Service {
   }
 
   Status HalfDuplexCall(
-      ServerContext* context,
+      ServerContext* /*context*/,
       ServerReaderWriter<StreamingOutputCallResponse,
                          StreamingOutputCallRequest>* stream) {
     std::vector<StreamingOutputCallRequest> requests;

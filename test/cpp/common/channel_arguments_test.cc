@@ -25,6 +25,7 @@
 #include "src/core/lib/gpr/useful.h"
 #include "src/core/lib/iomgr/exec_ctx.h"
 #include "src/core/lib/iomgr/socket_mutator.h"
+#include "test/core/util/test_config.h"
 
 namespace grpc {
 namespace testing {
@@ -36,7 +37,7 @@ class TestSocketMutator : public grpc_socket_mutator {
  public:
   TestSocketMutator();
 
-  bool MutateFd(int fd) {
+  bool MutateFd(int /*fd*/) {
     // Do nothing on the fd
     return true;
   }
@@ -83,6 +84,10 @@ class ChannelArgumentsTest : public ::testing::Test {
                       grpc_channel_args* args) {
     channel_args.SetChannelArgs(args);
   }
+
+  static void SetUpTestCase() { grpc_init(); }
+
+  static void TearDownTestCase() { grpc_shutdown(); }
 
   grpc::string GetDefaultUserAgentPrefix() {
     std::ostringstream user_agent_prefix;
@@ -251,9 +256,8 @@ TEST_F(ChannelArgumentsTest, SetUserAgentPrefix) {
 }  // namespace grpc
 
 int main(int argc, char** argv) {
+  grpc::testing::TestEnvironment env(argc, argv);
   ::testing::InitGoogleTest(&argc, argv);
-  grpc_init();
   int ret = RUN_ALL_TESTS();
-  grpc_shutdown();
   return ret;
 }

@@ -72,12 +72,12 @@ class DummyInterceptorFactory
       public experimental::ServerInterceptorFactoryInterface {
  public:
   virtual experimental::Interceptor* CreateClientInterceptor(
-      experimental::ClientRpcInfo* info) override {
+      experimental::ClientRpcInfo* /*info*/) override {
     return new DummyInterceptor();
   }
 
   virtual experimental::Interceptor* CreateServerInterceptor(
-      experimental::ServerRpcInfo* info) override {
+      experimental::ServerRpcInfo* /*info*/) override {
     return new DummyInterceptor();
   }
 };
@@ -88,12 +88,12 @@ class NullInterceptorFactory
       public experimental::ServerInterceptorFactoryInterface {
  public:
   virtual experimental::Interceptor* CreateClientInterceptor(
-      experimental::ClientRpcInfo* info) override {
+      experimental::ClientRpcInfo* /*info*/) override {
     return nullptr;
   }
 
   virtual experimental::Interceptor* CreateServerInterceptor(
-      experimental::ServerRpcInfo* info) override {
+      experimental::ServerRpcInfo* /*info*/) override {
     return nullptr;
   }
 };
@@ -101,6 +101,16 @@ class NullInterceptorFactory
 class EchoTestServiceStreamingImpl : public EchoTestService::Service {
  public:
   ~EchoTestServiceStreamingImpl() override {}
+
+  Status Echo(ServerContext* context, const EchoRequest* request,
+              EchoResponse* response) override {
+    auto client_metadata = context->client_metadata();
+    for (const auto& pair : client_metadata) {
+      context->AddTrailingMetadata(ToString(pair.first), ToString(pair.second));
+    }
+    response->set_message(request->message());
+    return Status::OK;
+  }
 
   Status BidiStream(
       ServerContext* context,
@@ -152,6 +162,8 @@ class EchoTestServiceStreamingImpl : public EchoTestService::Service {
   }
 };
 
+constexpr int kNumStreamingMessages = 10;
+
 void MakeCall(const std::shared_ptr<Channel>& channel);
 
 void MakeClientStreamingCall(const std::shared_ptr<Channel>& channel);
@@ -159,6 +171,14 @@ void MakeClientStreamingCall(const std::shared_ptr<Channel>& channel);
 void MakeServerStreamingCall(const std::shared_ptr<Channel>& channel);
 
 void MakeBidiStreamingCall(const std::shared_ptr<Channel>& channel);
+
+void MakeAsyncCQCall(const std::shared_ptr<Channel>& channel);
+
+void MakeAsyncCQClientStreamingCall(const std::shared_ptr<Channel>& channel);
+
+void MakeAsyncCQServerStreamingCall(const std::shared_ptr<Channel>& channel);
+
+void MakeAsyncCQBidiStreamingCall(const std::shared_ptr<Channel>& channel);
 
 void MakeCallbackCall(const std::shared_ptr<Channel>& channel);
 

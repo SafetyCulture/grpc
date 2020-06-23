@@ -57,6 +57,11 @@ DEFINE_string(proto_path, ".", "Path to look for the proto file.");
 DEFINE_string(protofiles, "", "Name of the proto file.");
 DEFINE_bool(binary_input, false, "Input in binary format");
 DEFINE_bool(binary_output, false, "Output in binary format");
+DEFINE_string(
+    default_service_config, "",
+    "Default service config to use on the channel, if non-empty. Note "
+    "that this will be ignored if the name resolver returns a service "
+    "config.");
 DEFINE_bool(json_input, false, "Input in json format");
 DEFINE_bool(json_output, false, "Output in json format");
 DEFINE_string(infile, "", "Input file (default is stdin)");
@@ -216,6 +221,10 @@ std::shared_ptr<grpc::Channel> CreateCliChannel(
   grpc::ChannelArguments args;
   if (!cred.GetSslTargetNameOverride().empty()) {
     args.SetSslTargetNameOverride(cred.GetSslTargetNameOverride());
+  }
+  if (!FLAGS_default_service_config.empty()) {
+    args.SetString(GRPC_ARG_SERVICE_CONFIG,
+                   FLAGS_default_service_config.c_str());
   }
   return ::grpc::CreateCustomChannel(server_address, cred.GetCredentials(),
                                      args);
@@ -427,7 +436,7 @@ bool GrpcTool::ListServices(int argc, const char** argv,
   return callback(output);
 }
 
-bool GrpcTool::PrintType(int argc, const char** argv,
+bool GrpcTool::PrintType(int /*argc*/, const char** argv,
                          const CliCredentials& cred,
                          GrpcToolOutputCallback callback) {
   CommandUsage(
@@ -469,6 +478,8 @@ bool GrpcTool::CallMethod(int argc, const char** argv,
       " fallback when parsing request/response\n"
       "    --proto_path             ; The search path of proto files, valid"
       " only when --protofiles is given\n"
+      "    --noremotedb             ; Don't attempt to use reflection service"
+      " at all\n"
       "    --metadata               ; The metadata to be sent to the server\n"
       "    --infile                 ; Input filename (defaults to stdin)\n"
       "    --outfile                ; Output filename (defaults to stdout)\n"
@@ -810,6 +821,8 @@ bool GrpcTool::ParseMessage(int argc, const char** argv,
       " fallback when parsing request/response\n"
       "    --proto_path             ; The search path of proto files, valid"
       " only when --protofiles is given\n"
+      "    --noremotedb             ; Don't attempt to use reflection service"
+      " at all\n"
       "    --infile                 ; Input filename (defaults to stdin)\n"
       "    --outfile                ; Output filename (defaults to stdout)\n"
       "    --binary_input           ; Input in binary format\n"

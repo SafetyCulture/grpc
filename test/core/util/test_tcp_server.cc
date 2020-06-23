@@ -28,14 +28,13 @@
 #include <grpc/support/time.h>
 #include <string.h>
 
-#include "src/core/lib/gpr/host_port.h"
 #include "src/core/lib/iomgr/endpoint.h"
 #include "src/core/lib/iomgr/resolve_address.h"
 #include "src/core/lib/iomgr/tcp_server.h"
 #include "test/core/util/port.h"
 #include "test/core/util/test_config.h"
 
-static void on_server_destroyed(void* data, grpc_error* error) {
+static void on_server_destroyed(void* data, grpc_error* /*error*/) {
   test_tcp_server* server = static_cast<test_tcp_server*>(data);
   server->shutdown = 1;
 }
@@ -88,8 +87,8 @@ void test_tcp_server_poll(test_tcp_server* server, int milliseconds) {
   gpr_mu_unlock(server->mu);
 }
 
-static void do_nothing(void* arg, grpc_error* error) {}
-static void finish_pollset(void* arg, grpc_error* error) {
+static void do_nothing(void* /*arg*/, grpc_error* /*error*/) {}
+static void finish_pollset(void* arg, grpc_error* /*error*/) {
   grpc_pollset_destroy(static_cast<grpc_pollset*>(arg));
 }
 
@@ -102,6 +101,7 @@ void test_tcp_server_destroy(test_tcp_server* server) {
                     grpc_schedule_on_exec_ctx);
   shutdown_deadline = gpr_time_add(gpr_now(GPR_CLOCK_MONOTONIC),
                                    gpr_time_from_seconds(5, GPR_TIMESPAN));
+  grpc_core::ExecCtx::Get()->Flush();
   while (!server->shutdown &&
          gpr_time_cmp(gpr_now(GPR_CLOCK_MONOTONIC), shutdown_deadline) < 0) {
     test_tcp_server_poll(server, 1000);

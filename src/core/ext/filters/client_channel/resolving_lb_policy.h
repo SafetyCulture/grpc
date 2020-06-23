@@ -21,14 +21,15 @@
 
 #include <grpc/support/port_platform.h>
 
-#include "src/core/ext/filters/client_channel/client_channel_channelz.h"
+#include "absl/container/inlined_vector.h"
+
+#include "src/core/ext/filters/client_channel/config_selector.h"
 #include "src/core/ext/filters/client_channel/lb_policy.h"
 #include "src/core/ext/filters/client_channel/lb_policy_factory.h"
 #include "src/core/ext/filters/client_channel/resolver.h"
 #include "src/core/lib/channel/channel_args.h"
 #include "src/core/lib/channel/channel_stack.h"
 #include "src/core/lib/debug/trace.h"
-#include "src/core/lib/gprpp/inlined_vector.h"
 #include "src/core/lib/gprpp/orphanable.h"
 #include "src/core/lib/iomgr/call_combiner.h"
 #include "src/core/lib/iomgr/closure.h"
@@ -52,93 +53,88 @@ namespace grpc_core {
 // child LB policy and config to use.
 class ResolvingLoadBalancingPolicy : public LoadBalancingPolicy {
  public:
-  // If error is set when this returns, then construction failed, and
-  // the caller may not use the new object.
-  ResolvingLoadBalancingPolicy(
-      Args args, TraceFlag* tracer, UniquePtr<char> target_uri,
-      UniquePtr<char> child_policy_name,
-      RefCountedPtr<ParsedLoadBalancingConfig> child_lb_config,
-      grpc_error** error);
+  class ChannelConfigHelper {
+   public:
+    struct ApplyServiceConfigResult {
+      // Set to true if the service config has changed since the last result.
+      bool service_config_changed = false;
+      // Set to true if we don't have a valid service config to use.
+      // This tells the ResolvingLoadBalancingPolicy to put the channel
+      // into TRANSIENT_FAILURE.
+      bool no_valid_service_config = false;
+      // A service config parsing error occurred.
+      grpc_error* service_config_error = GRPC_ERROR_NONE;
+      // The LB policy config to use.
+      RefCountedPtr<LoadBalancingPolicy::Config> lb_policy_config;
+    };
 
-  // Private ctor, to be used by client_channel only!
-  //
-  // Synchronous callback that takes the resolver result and sets
-  // lb_policy_name and lb_policy_config to point to the right data.
-  // Returns true if the service config has changed since the last result.
-  // If the returned service_config_error is not none and lb_policy_name is
-  // empty, it means that we don't have a valid service config to use, and we
-  // should set the channel to be in TRANSIENT_FAILURE.
-  typedef bool (*ProcessResolverResultCallback)(
-      void* user_data, Resolver::Result* result, const char** lb_policy_name,
-      RefCountedPtr<ParsedLoadBalancingConfig>* lb_policy_config,
-      grpc_error** service_config_error);
-  // If error is set when this returns, then construction failed, and
-  // the caller may not use the new object.
-  ResolvingLoadBalancingPolicy(
-      Args args, TraceFlag* tracer, UniquePtr<char> target_uri,
-      ProcessResolverResultCallback process_resolver_result,
-      void* process_resolver_result_user_data, grpc_error** error);
+    virtual ~ChannelConfigHelper() = default;
+
+    // Applies the service config to the channel.
+    virtual ApplyServiceConfigResult ApplyServiceConfig(
+        const Resolver::Result& result) = 0;
+
+    // Applies the ConfigSelector to the channel.
+    virtual void ApplyConfigSelector(
+        bool service_config_changed,
+        RefCountedPtr<ConfigSelector> config_selector) = 0;
+
+    // Indicates a resolver transient failure.
+    virtual void ResolverTransientFailure(grpc_error* error) = 0;
+  };
+
+  ResolvingLoadBalancingPolicy(Args args, TraceFlag* tracer,
+                               grpc_core::UniquePtr<char> target_uri,
+                               ChannelConfigHelper* helper);
 
   virtual const char* name() const override { return "resolving_lb"; }
 
   // No-op -- should never get updates from the channel.
   // TODO(roth): Need to support updating child LB policy's config for xds
   // use case.
-  void UpdateLocked(UpdateArgs args) override {}
+  void UpdateLocked(UpdateArgs /*args*/) override {}
 
   void ExitIdleLocked() override;
 
   void ResetBackoffLocked() override;
 
-  void FillChildRefsForChannelz(
-      channelz::ChildRefsList* child_subchannels,
-      channelz::ChildRefsList* child_channels) override;
-
  private:
-  using TraceStringVector = InlinedVector<char*, 3>;
+  using TraceStringVector = absl::InlinedVector<const char*, 3>;
 
   class ResolverResultHandler;
   class ResolvingControlHelper;
 
   ~ResolvingLoadBalancingPolicy();
 
-  grpc_error* Init(const grpc_channel_args& args);
   void ShutdownLocked() override;
 
-  void StartResolvingLocked();
   void OnResolverError(grpc_error* error);
   void CreateOrUpdateLbPolicyLocked(
-      const char* lb_policy_name,
-      RefCountedPtr<ParsedLoadBalancingConfig> lb_policy_config,
-      Resolver::Result result, TraceStringVector* trace_strings);
+      RefCountedPtr<LoadBalancingPolicy::Config> lb_policy_config,
+      Resolver::Result result);
   OrphanablePtr<LoadBalancingPolicy> CreateLbPolicyLocked(
-      const char* lb_policy_name, const grpc_channel_args& args,
-      TraceStringVector* trace_strings);
+      const grpc_channel_args& args);
   void MaybeAddTraceMessagesForAddressChangesLocked(
       bool resolution_contains_addresses, TraceStringVector* trace_strings);
   void ConcatenateAndAddChannelTraceLocked(
-      TraceStringVector* trace_strings) const;
+      const TraceStringVector& trace_strings) const;
   void OnResolverResultChangedLocked(Resolver::Result result);
 
   // Passed in from caller at construction time.
   TraceFlag* tracer_;
-  UniquePtr<char> target_uri_;
-  ProcessResolverResultCallback process_resolver_result_ = nullptr;
-  void* process_resolver_result_user_data_ = nullptr;
-  UniquePtr<char> child_policy_name_;
-  RefCountedPtr<ParsedLoadBalancingConfig> child_lb_config_;
+  grpc_core::UniquePtr<char> target_uri_;
+  ChannelConfigHelper* helper_;
 
   // Resolver and associated state.
   OrphanablePtr<Resolver> resolver_;
-  bool started_resolving_ = false;
   bool previous_resolution_contained_addresses_ = false;
+
+  // Determined by resolver results.
+  grpc_core::UniquePtr<char> child_policy_name_;
+  RefCountedPtr<LoadBalancingPolicy::Config> child_lb_config_;
 
   // Child LB policy.
   OrphanablePtr<LoadBalancingPolicy> lb_policy_;
-  OrphanablePtr<LoadBalancingPolicy> pending_lb_policy_;
-  // Lock held when modifying the value of child_policy_ or
-  // pending_child_policy_.
-  gpr_mu lb_policy_mu_;
 };
 
 }  // namespace grpc_core

@@ -22,8 +22,11 @@
 #include <grpc/grpc_security.h>
 
 #include <grpcpp/security/credentials.h>
+#include <grpcpp/security/credentials_impl.h>
+#include <grpcpp/security/tls_credentials_options.h>
 #include <grpcpp/support/config.h>
 
+#include "absl/strings/str_cat.h"
 #include "src/core/lib/security/credentials/credentials.h"
 #include "src/cpp/server/thread_pool_interface.h"
 
@@ -39,14 +42,14 @@ class SecureChannelCredentials final : public ChannelCredentials {
   }
   grpc_channel_credentials* GetRawCreds() { return c_creds_; }
 
-  std::shared_ptr<::grpc::Channel> CreateChannelImpl(
-      const grpc::string& target, const grpc::ChannelArguments& args) override;
+  std::shared_ptr<Channel> CreateChannelImpl(
+      const grpc::string& target, const ChannelArguments& args) override;
 
   SecureChannelCredentials* AsSecureCredentials() override { return this; }
 
  private:
-  std::shared_ptr<::grpc::Channel> CreateChannelWithInterceptors(
-      const grpc::string& target, const grpc::ChannelArguments& args,
+  std::shared_ptr<Channel> CreateChannelWithInterceptors(
+      const grpc::string& target, const ChannelArguments& args,
       std::vector<std::unique_ptr<
           ::grpc::experimental::ClientInterceptorFactoryInterface>>
           interceptor_creators) override;
@@ -63,10 +66,24 @@ class SecureCallCredentials final : public CallCredentials {
 
   bool ApplyToCall(grpc_call* call) override;
   SecureCallCredentials* AsSecureCredentials() override { return this; }
+  grpc::string DebugString() override {
+    return absl::StrCat("SecureCallCredentials{",
+                        grpc::string(c_creds_->debug_string()), "}");
+  }
 
  private:
   grpc_call_credentials* const c_creds_;
 };
+
+namespace experimental {
+
+// Transforms C++ STS Credentials options to core options. The pointers of the
+// resulting core options point to the memory held by the C++ options so C++
+// options need to be kept alive until after the core credentials creation.
+grpc_sts_credentials_options StsCredentialsCppToCoreOptions(
+    const StsCredentialsOptions& options);
+
+}  // namespace experimental
 
 }  // namespace grpc_impl
 
@@ -81,6 +98,7 @@ class MetadataCredentialsPluginWrapper final : private GrpcLibraryCodegen {
       grpc_metadata creds_md[GRPC_METADATA_CREDENTIALS_PLUGIN_SYNC_MAX],
       size_t* num_creds_md, grpc_status_code* status,
       const char** error_details);
+  static char* DebugString(void* wrapper);
 
   explicit MetadataCredentialsPluginWrapper(
       std::unique_ptr<MetadataCredentialsPlugin> plugin);

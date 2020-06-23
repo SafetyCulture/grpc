@@ -100,12 +100,32 @@ inline grpc::string Modularize(grpc::string s) {
   return new_string;
 }
 
+// RubyPackage gets the ruby package in either proto or ruby_package format
+inline grpc::string RubyPackage(const grpc::protobuf::FileDescriptor* file) {
+  grpc::string package_name = file->package();
+  if (file->options().has_ruby_package()) {
+    package_name = file->options().ruby_package();
+
+    // If :: is in the package convert the Ruby formatted name
+    //    -> A::B::C
+    // to use the dot seperator notation
+    //    -> A.B.C
+    package_name = ReplaceAll(package_name, "::", ".");
+  }
+  return package_name;
+}
+
 // RubyTypeOf updates a proto type to the required ruby equivalent.
-inline grpc::string RubyTypeOf(const grpc::string& a_type,
+inline grpc::string RubyTypeOf(const grpc::protobuf::Descriptor* descriptor,
                                const grpc::string& package) {
-  grpc::string res(a_type);
-  ReplacePrefix(&res, package, "");  // remove the leading package if present
-  ReplacePrefix(&res, ".", "");      // remove the leading . (no package)
+  std::string proto_type = descriptor->full_name();
+  ReplacePrefix(&proto_type, package,
+                "");                    // remove the leading package if present
+  ReplacePrefix(&proto_type, ".", "");  // remove the leading . (no package)
+  if (descriptor->file()->options().has_ruby_package()) {
+    proto_type = RubyPackage(descriptor->file()) + "." + proto_type;
+  }
+  grpc::string res(proto_type);
   if (res.find('.') == grpc::string::npos) {
     return res;
   } else {

@@ -27,23 +27,51 @@
 #import <RxLibrary/GRXWriteable.h>
 #import <RxLibrary/GRXWriter+Transformations.h>
 
-/**
- * Generate an NSError object that represents a failure in parsing a proto class.
- */
-static NSError *ErrorForBadProto(id proto, Class expectedClass, NSError *parsingError) {
-  NSDictionary *info = @{
-    NSLocalizedDescriptionKey : @"Unable to parse response from the server",
-    NSLocalizedRecoverySuggestionErrorKey :
-        @"If this RPC is idempotent, retry "
-        @"with exponential backoff. Otherwise, query the server status before "
-        @"retrying.",
-    NSUnderlyingErrorKey : parsingError,
-    @"Expected class" : expectedClass,
-    @"Received value" : proto,
-  };
-  // TODO(jcanizales): Use kGRPCErrorDomain and GRPCErrorCodeInternal when they're public.
-  return [NSError errorWithDomain:@"io.grpc" code:13 userInfo:info];
+@implementation GRPCUnaryResponseHandler {
+  void (^_responseHandler)(id, NSError *);
+  dispatch_queue_t _responseDispatchQueue;
+
+  GPBMessage *_message;
 }
+
+- (nullable instancetype)initWithResponseHandler:(void (^)(id, NSError *))handler
+                           responseDispatchQueue:(dispatch_queue_t)dispatchQueue {
+  if ((self = [super init])) {
+    _responseHandler = handler;
+    if (dispatchQueue == nil) {
+      _responseDispatchQueue = dispatch_get_main_queue();
+    } else {
+      _responseDispatchQueue = dispatchQueue;
+    }
+  }
+  return self;
+}
+
+// Implements GRPCProtoResponseHandler
+- (dispatch_queue_t)dispatchQueue {
+  return _responseDispatchQueue;
+}
+
+- (void)didReceiveInitialMetadata:(NSDictionary *)initialMetadata {
+  _responseHeaders = [initialMetadata copy];
+}
+
+- (void)didReceiveProtoMessage:(GPBMessage *)message {
+  _message = message;
+}
+
+- (void)didCloseWithTrailingMetadata:(NSDictionary *)trailingMetadata error:(NSError *)error {
+  _responseTrailers = [trailingMetadata copy];
+  GPBMessage *message = _message;
+  _message = nil;
+  _responseHandler(message, error);
+}
+
+// Intentional no-op since flow control is N/A in a unary call
+- (void)didWriteMessage {
+}
+
+@end
 
 @implementation GRPCUnaryProtoCall {
   GRPCStreamingProtoCall *_call;
@@ -83,7 +111,7 @@ static NSError *ErrorForBadProto(id proto, Class expectedClass, NSError *parsing
 
 @end
 
-@interface GRPCStreamingProtoCall ()<GRPCResponseHandler>
+@interface GRPCStreamingProtoCall () <GRPCResponseHandler>
 
 @end
 
@@ -224,11 +252,11 @@ static NSError *ErrorForBadProto(id proto, Class expectedClass, NSError *parsing
   }
 }
 
-- (void)didReceiveRawMessage:(NSData *)message {
-  if (message == nil) return;
+- (void)didReceiveData:(id)data {
+  if (data == nil) return;
 
   NSError *error = nil;
-  GPBMessage *parsed = [_responseClass parseFromData:message error:&error];
+  GPBMessage *parsed = [_responseClass parseFromData:data error:&error];
   @synchronized(self) {
     if (parsed && [_handler respondsToSelector:@selector(didReceiveProtoMessage:)]) {
       dispatch_async(_dispatchQueue, ^{
@@ -238,8 +266,8 @@ static NSError *ErrorForBadProto(id proto, Class expectedClass, NSError *parsing
         }
         [copiedHandler didReceiveProtoMessage:parsed];
       });
-    } else if (!parsed &&
-               [_handler respondsToSelector:@selector(didCloseWithTrailingMetadata:error:)]) {
+    } else if (!parsed && [_handler respondsToSelector:@selector(didCloseWithTrailingMetadata:
+                                                                                        error:)]) {
       dispatch_async(_dispatchQueue, ^{
         id<GRPCProtoResponseHandler> copiedHandler = nil;
         @synchronized(self) {
@@ -248,7 +276,7 @@ static NSError *ErrorForBadProto(id proto, Class expectedClass, NSError *parsing
         }
         [copiedHandler
             didCloseWithTrailingMetadata:nil
-                                   error:ErrorForBadProto(message, self->_responseClass, error)];
+                                   error:ErrorForBadProto(data, self->_responseClass, error)];
       });
       [_call cancel];
       _call = nil;
@@ -292,75 +320,20 @@ static NSError *ErrorForBadProto(id proto, Class expectedClass, NSError *parsing
 
 @end
 
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-implementations"
-@implementation ProtoRPC {
-#pragma clang diagnostic pop
-  id<GRXWriteable> _responseWriteable;
+/**
+ * Generate an NSError object that represents a failure in parsing a proto class.
+ */
+NSError *ErrorForBadProto(id proto, Class expectedClass, NSError *parsingError) {
+  NSDictionary *info = @{
+    NSLocalizedDescriptionKey : @"Unable to parse response from the server",
+    NSLocalizedRecoverySuggestionErrorKey :
+        @"If this RPC is idempotent, retry "
+        @"with exponential backoff. Otherwise, query the server status before "
+        @"retrying.",
+    NSUnderlyingErrorKey : parsingError,
+    @"Expected class" : expectedClass,
+    @"Received value" : proto,
+  };
+  // TODO(jcanizales): Use kGRPCErrorDomain and GRPCErrorCodeInternal when they're public.
+  return [NSError errorWithDomain:@"io.grpc" code:13 userInfo:info];
 }
-
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wobjc-designated-initializers"
-- (instancetype)initWithHost:(NSString *)host
-                        path:(NSString *)path
-              requestsWriter:(GRXWriter *)requestsWriter {
-  [NSException raise:NSInvalidArgumentException
-              format:@"Please use ProtoRPC's designated initializer instead."];
-  return nil;
-}
-#pragma clang diagnostic pop
-
-// Designated initializer
-- (instancetype)initWithHost:(NSString *)host
-                      method:(GRPCProtoMethod *)method
-              requestsWriter:(GRXWriter *)requestsWriter
-               responseClass:(Class)responseClass
-          responsesWriteable:(id<GRXWriteable>)responsesWriteable {
-  // Because we can't tell the type system to constrain the class, we need to check at runtime:
-  if (![responseClass respondsToSelector:@selector(parseFromData:error:)]) {
-    [NSException raise:NSInvalidArgumentException
-                format:@"A protobuf class to parse the responses must be provided."];
-  }
-  // A writer that serializes the proto messages to send.
-  GRXWriter *bytesWriter = [requestsWriter map:^id(GPBMessage *proto) {
-    if (![proto isKindOfClass:[GPBMessage class]]) {
-      [NSException raise:NSInvalidArgumentException
-                  format:@"Request must be a proto message: %@", proto];
-    }
-    return [proto data];
-  }];
-  if ((self = [super initWithHost:host path:method.HTTPPath requestsWriter:bytesWriter])) {
-    __weak ProtoRPC *weakSelf = self;
-
-    // A writeable that parses the proto messages received.
-    _responseWriteable = [[GRXWriteable alloc] initWithValueHandler:^(NSData *value) {
-      // TODO(jcanizales): This is done in the main thread, and needs to happen in another thread.
-      NSError *error = nil;
-      id parsed = [responseClass parseFromData:value error:&error];
-      if (parsed) {
-        [responsesWriteable writeValue:parsed];
-      } else {
-        [weakSelf finishWithError:ErrorForBadProto(value, responseClass, error)];
-      }
-    }
-        completionHandler:^(NSError *errorOrNil) {
-          [responsesWriteable writesFinishedWithError:errorOrNil];
-        }];
-  }
-  return self;
-}
-
-- (void)start {
-  [self startWithWriteable:_responseWriteable];
-}
-
-- (void)startWithWriteable:(id<GRXWriteable>)writeable {
-  [super startWithWriteable:writeable];
-  // Break retain cycles.
-  _responseWriteable = nil;
-}
-@end
-
-@implementation GRPCProtoCall
-
-@end

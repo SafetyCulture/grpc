@@ -25,13 +25,11 @@
 #include <grpc/support/log.h>
 
 #include "src/core/lib/slice/percent_encoding.h"
-#include "test/core/util/memory_counters.h"
 
 bool squelch = true;
 bool leak_check = true;
 
 static void test(const uint8_t* data, size_t size, const uint8_t* dict) {
-  grpc_core::testing::LeakDetector leak_detector(true);
   grpc_init();
   grpc_slice input =
       grpc_slice_from_copied_buffer(reinterpret_cast<const char*>(data), size);

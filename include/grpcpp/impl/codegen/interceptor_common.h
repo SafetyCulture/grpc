@@ -166,9 +166,9 @@ class InterceptorBatchMethodsImpl
     send_trailing_metadata_ = metadata;
   }
 
-  void SetRecvMessage(void* message, bool* got_message) {
+  void SetRecvMessage(void* message, bool* hijacked_recv_message_failed) {
     recv_message_ = message;
-    got_message_ = got_message;
+    hijacked_recv_message_failed_ = hijacked_recv_message_failed;
   }
 
   void SetRecvInitialMetadata(MetadataMap* map) {
@@ -195,7 +195,7 @@ class InterceptorBatchMethodsImpl
   void FailHijackedRecvMessage() override {
     GPR_CODEGEN_ASSERT(hooks_[static_cast<size_t>(
         experimental::InterceptionHookPoints::PRE_RECV_MESSAGE)]);
-    *got_message_ = false;
+    *hijacked_recv_message_failed_ = true;
   }
 
   // Clears all state
@@ -407,7 +407,7 @@ class InterceptorBatchMethodsImpl
   std::multimap<grpc::string, grpc::string>* send_trailing_metadata_ = nullptr;
 
   void* recv_message_ = nullptr;
-  bool* got_message_ = nullptr;
+  bool* hijacked_recv_message_failed_ = nullptr;
 
   MetadataMap* recv_initial_metadata_ = nullptr;
 
@@ -465,7 +465,7 @@ class CancelInterceptorBatchMethods
     return nullptr;
   }
 
-  void ModifySendMessage(const void* message) override {
+  void ModifySendMessage(const void* /*message*/) override {
     GPR_CODEGEN_ASSERT(
         false &&
         "It is illegal to call ModifySendMessage on a method which "
@@ -486,7 +486,7 @@ class CancelInterceptorBatchMethods
     return Status();
   }
 
-  void ModifySendStatus(const Status& status) override {
+  void ModifySendStatus(const Status& /*status*/) override {
     GPR_CODEGEN_ASSERT(false &&
                        "It is illegal to call ModifySendStatus on a method "
                        "which has a Cancel notification");

@@ -22,15 +22,19 @@
 #include <grpc/support/port_platform.h>
 
 #include <grpc/slice_buffer.h>
-#include "src/core/lib/gprpp/abstract.h"
 #include "src/core/lib/gprpp/orphanable.h"
 #include "src/core/lib/iomgr/closure.h"
 
 /** Internal bit flag for grpc_begin_message's \a flags signaling the use of
- * compression for the message */
+ * compression for the message. (Does not apply for stream compression.) */
 #define GRPC_WRITE_INTERNAL_COMPRESS (0x80000000u)
+/** Internal bit flag for determining whether the message was compressed and had
+ * to be decompressed by the message_decompress filter. (Does not apply for
+ * stream compression.) */
+#define GRPC_WRITE_INTERNAL_TEST_ONLY_WAS_COMPRESSED (0x40000000u)
 /** Mask of all valid internal flags. */
-#define GRPC_WRITE_INTERNAL_USED_MASK (GRPC_WRITE_INTERNAL_COMPRESS)
+#define GRPC_WRITE_INTERNAL_USED_MASK \
+  (GRPC_WRITE_INTERNAL_COMPRESS | GRPC_WRITE_INTERNAL_TEST_ONLY_WAS_COMPRESSED)
 
 namespace grpc_core {
 
@@ -41,18 +45,18 @@ class ByteStream : public Orphanable {
   // Returns true if the bytes are available immediately (in which case
   // on_complete will not be called), or false if the bytes will be available
   // asynchronously (in which case on_complete will be called when they
-  // are available).
+  // are available). Should not be called if there is no data left on the
+  // stream.
   //
   // max_size_hint can be set as a hint as to the maximum number
   // of bytes that would be acceptable to read.
-  virtual bool Next(size_t max_size_hint,
-                    grpc_closure* on_complete) GRPC_ABSTRACT;
+  virtual bool Next(size_t max_size_hint, grpc_closure* on_complete) = 0;
 
   // Returns the next slice in the byte stream when it is available, as
   // indicated by Next().
   //
   // Once a slice is returned into *slice, it is owned by the caller.
-  virtual grpc_error* Pull(grpc_slice* slice) GRPC_ABSTRACT;
+  virtual grpc_error* Pull(grpc_slice* slice) = 0;
 
   // Shuts down the byte stream.
   //
@@ -61,14 +65,12 @@ class ByteStream : public Orphanable {
   //
   // The next call to Pull() (if any) will return the error passed to
   // Shutdown().
-  virtual void Shutdown(grpc_error* error) GRPC_ABSTRACT;
+  virtual void Shutdown(grpc_error* error) = 0;
 
   uint32_t length() const { return length_; }
   uint32_t flags() const { return flags_; }
 
   void set_flags(uint32_t flags) { flags_ = flags; }
-
-  GRPC_ABSTRACT_BASE_CLASS
 
  protected:
   ByteStream(uint32_t length, uint32_t flags)
@@ -99,9 +101,8 @@ class SliceBufferByteStream : public ByteStream {
   void Shutdown(grpc_error* error) override;
 
  private:
-  grpc_slice_buffer backing_buffer_;
-  size_t cursor_ = 0;
   grpc_error* shutdown_error_ = GRPC_ERROR_NONE;
+  grpc_slice_buffer backing_buffer_;
 };
 
 //

@@ -12,16 +12,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-cimport cpython
-
 
 cdef class Call:
 
-  def __cinit__(self, _VTable vtable not None):
+  def __cinit__(self):
     # Create an *empty* call
     fork_handlers_and_grpc_init()
     self.c_call = NULL
-    self.references = [vtable]
+    self.references = []
 
   def _start_batch(self, operations, tag, retain_self):
     if not self.is_valid:

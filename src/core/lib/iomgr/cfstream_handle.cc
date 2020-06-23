@@ -18,21 +18,28 @@
 
 #include <grpc/support/port_platform.h>
 
+#include "src/core/lib/gprpp/memory.h"
 #include "src/core/lib/iomgr/port.h"
 
 #ifdef GRPC_CFSTREAM
 #import <CoreFoundation/CoreFoundation.h>
 #import "src/core/lib/iomgr/cfstream_handle.h"
 
+#include <grpc/grpc.h>
 #include <grpc/support/atm.h>
 #include <grpc/support/sync.h>
 
 #include "src/core/lib/debug/trace.h"
 #include "src/core/lib/iomgr/closure.h"
 #include "src/core/lib/iomgr/error_cfstream.h"
+#include "src/core/lib/iomgr/ev_apple.h"
 #include "src/core/lib/iomgr/exec_ctx.h"
 
 extern grpc_core::TraceFlag grpc_tcp_trace;
+
+GrpcLibraryInitHolder::GrpcLibraryInitHolder() { grpc_init(); }
+
+GrpcLibraryInitHolder::~GrpcLibraryInitHolder() { grpc_shutdown(); }
 
 void* CFStreamHandle::Retain(void* info) {
   CFStreamHandle* handle = static_cast<CFStreamHandle*>(info);
@@ -141,8 +148,8 @@ CFStreamHandle::CFStreamHandle(CFReadStreamRef read_stream,
       kCFStreamEventOpenCompleted | kCFStreamEventCanAcceptBytes |
           kCFStreamEventErrorOccurred | kCFStreamEventEndEncountered,
       CFStreamHandle::WriteCallback, &ctx);
-  CFReadStreamSetDispatchQueue(read_stream, dispatch_queue_);
-  CFWriteStreamSetDispatchQueue(write_stream, dispatch_queue_);
+  grpc_apple_register_read_stream(read_stream, dispatch_queue_);
+  grpc_apple_register_write_stream(write_stream, dispatch_queue_);
 }
 
 CFStreamHandle::~CFStreamHandle() {
@@ -183,7 +190,7 @@ void CFStreamHandle::Ref(const char* file, int line, const char* reason) {
 void CFStreamHandle::Unref(const char* file, int line, const char* reason) {
   if (grpc_tcp_trace.enabled()) {
     gpr_atm val = gpr_atm_no_barrier_load(&refcount_.count);
-    gpr_log(GPR_ERROR,
+    gpr_log(GPR_DEBUG,
             "CFStream Handle unref %p : %s %" PRIdPTR " -> %" PRIdPTR, this,
             reason, val, val - 1);
   }

@@ -26,7 +26,7 @@ using grpc::health::v1::HealthCheckResponse;
 namespace grpc {
 namespace testing {
 
-Status HealthCheckServiceImpl::Check(ServerContext* context,
+Status HealthCheckServiceImpl::Check(ServerContext* /*context*/,
                                      const HealthCheckRequest* request,
                                      HealthCheckResponse* response) {
   std::lock_guard<std::mutex> lock(mu_);
@@ -54,6 +54,7 @@ Status HealthCheckServiceImpl::Watch(
       }
       if (response.status() != last_state) {
         writer->Write(response, ::grpc::WriteOptions());
+        last_state = response.status();
       }
     }
     gpr_sleep_until(gpr_time_add(gpr_now(GPR_CLOCK_MONOTONIC),

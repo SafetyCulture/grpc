@@ -20,8 +20,6 @@
 
 #include "src/core/ext/filters/client_channel/server_address.h"
 
-#include <string.h>
-
 namespace grpc_core {
 
 //
@@ -45,11 +43,6 @@ int ServerAddress::Cmp(const ServerAddress& other) const {
   int retval = memcmp(address_.addr, other.address_.addr, address_.len);
   if (retval != 0) return retval;
   return grpc_channel_args_compare(args_, other.args_);
-}
-
-bool ServerAddress::IsBalancer() const {
-  return grpc_channel_arg_get_bool(
-      grpc_channel_args_find(args_, GRPC_ARG_ADDRESS_IS_BALANCER), false);
 }
 
 }  // namespace grpc_core

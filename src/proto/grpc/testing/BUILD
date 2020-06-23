@@ -14,15 +14,23 @@
 
 licenses(["notice"])  # Apache v2
 
-load("//bazel:grpc_build_system.bzl", "grpc_proto_library", "grpc_package")
 load("@grpc_python_dependencies//:requirements.bzl", "requirement")
-load("//bazel:python_rules.bzl", "py_proto_library")
+load("@rules_proto//proto:defs.bzl", "proto_library")
+load("//bazel:grpc_build_system.bzl", "grpc_package", "grpc_proto_library")
+load("//bazel:python_rules.bzl", "py_grpc_library", "py_proto_library")
 
-grpc_package(name = "testing", visibility = "public")
+grpc_package(
+    name = "testing",
+    visibility = "public",
+)
 
 exports_files([
     "echo.proto",
     "echo_messages.proto",
+    "empty.proto",
+    "messages.proto",
+    "simple_messages.proto",
+    "test.proto",
 ])
 
 grpc_proto_library(
@@ -44,15 +52,16 @@ grpc_proto_library(
 grpc_proto_library(
     name = "echo_messages_proto",
     srcs = ["echo_messages.proto"],
-    has_services = False,
 )
 
 grpc_proto_library(
     name = "echo_proto",
     srcs = ["echo.proto"],
-    deps = ["echo_messages_proto",
-            "simple_messages_proto"],
     generate_mocks = True,
+    deps = [
+        "echo_messages_proto",
+        "simple_messages_proto",
+    ],
 )
 
 grpc_proto_library(
@@ -67,8 +76,14 @@ proto_library(
 )
 
 py_proto_library(
-    name = "py_empty_proto",
+    name = "empty_py_pb2",
     deps = [":empty_proto_descriptor"],
+)
+
+py_grpc_library(
+    name = "empty_py_pb2_grpc",
+    srcs = [":empty_proto_descriptor"],
+    deps = [":empty_py_pb2"],
 )
 
 grpc_proto_library(
@@ -87,6 +102,12 @@ py_proto_library(
     deps = [":messages_proto_descriptor"],
 )
 
+py_grpc_library(
+    name = "messages_py_pb2_grpc",
+    srcs = [":messages_proto_descriptor"],
+    deps = [":py_messages_proto"],
+)
+
 grpc_proto_library(
     name = "metrics_proto",
     srcs = ["metrics.proto"],
@@ -102,15 +123,32 @@ grpc_proto_library(
     name = "benchmark_service_proto",
     srcs = ["benchmark_service.proto"],
     deps = [
-      "messages_proto",
+        "messages_proto",
     ],
+)
+
+proto_library(
+    name = "benchmark_service_descriptor",
+    srcs = ["benchmark_service.proto"],
+    deps = [":messages_proto_descriptor"],
+)
+
+py_proto_library(
+    name = "benchmark_service_py_pb2",
+    deps = [":benchmark_service_descriptor"],
+)
+
+py_grpc_library(
+    name = "benchmark_service_py_pb2_grpc",
+    srcs = [":benchmark_service_descriptor"],
+    deps = [":benchmark_service_py_pb2"],
 )
 
 grpc_proto_library(
     name = "report_qps_scenario_service_proto",
     srcs = ["report_qps_scenario_service.proto"],
     deps = [
-      "control_proto",
+        "control_proto",
     ],
 )
 
@@ -118,14 +156,13 @@ grpc_proto_library(
     name = "worker_service_proto",
     srcs = ["worker_service.proto"],
     deps = [
-      "control_proto",
+        "control_proto",
     ],
 )
 
 grpc_proto_library(
     name = "simple_messages_proto",
     srcs = ["simple_messages.proto"],
-    has_services = False,
 )
 
 grpc_proto_library(
@@ -134,7 +171,7 @@ grpc_proto_library(
     has_services = False,
     deps = [
         "//src/proto/grpc/core:stats_proto",
-    ]
+    ],
 )
 
 grpc_proto_library(
@@ -188,8 +225,63 @@ proto_library(
 
 py_proto_library(
     name = "py_test_proto",
-    deps = [
-        ":test_proto_descriptor",
-    ]
+    deps = [":test_proto_descriptor"],
 )
 
+py_grpc_library(
+    name = "test_py_pb2_grpc",
+    srcs = [":test_proto_descriptor"],
+    deps = [":py_test_proto"],
+)
+
+proto_library(
+    name = "worker_service_descriptor",
+    srcs = ["worker_service.proto"],
+    deps = [":control_descriptor"],
+)
+
+py_proto_library(
+    name = "worker_service_py_pb2",
+    deps = [":worker_service_descriptor"],
+)
+
+py_grpc_library(
+    name = "worker_service_py_pb2_grpc",
+    srcs = [":worker_service_descriptor"],
+    deps = [":worker_service_py_pb2"],
+)
+
+proto_library(
+    name = "stats_descriptor",
+    srcs = ["stats.proto"],
+    deps = ["//src/proto/grpc/core:stats_descriptor"],
+)
+
+py_proto_library(
+    name = "stats_py_pb2",
+    deps = [":stats_descriptor"],
+)
+
+proto_library(
+    name = "payloads_descriptor",
+    srcs = ["payloads.proto"],
+)
+
+py_proto_library(
+    name = "payloads_py_pb2",
+    deps = [":payloads_descriptor"],
+)
+
+proto_library(
+    name = "control_descriptor",
+    srcs = ["control.proto"],
+    deps = [
+        ":payloads_descriptor",
+        ":stats_descriptor",
+    ],
+)
+
+py_proto_library(
+    name = "control_py_pb2",
+    deps = [":control_descriptor"],
+)

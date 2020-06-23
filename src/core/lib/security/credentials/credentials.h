@@ -21,6 +21,8 @@
 
 #include <grpc/support/port_platform.h>
 
+#include <string.h>
+
 #include <grpc/grpc.h>
 #include <grpc/grpc_security.h>
 #include <grpc/support/sync.h>
@@ -64,8 +66,8 @@ typedef enum {
 #define GRPC_COMPUTE_ENGINE_METADATA_TOKEN_PATH \
   "/computeMetadata/v1/instance/service-accounts/default/token"
 
-#define GRPC_GOOGLE_OAUTH2_SERVICE_HOST "www.googleapis.com"
-#define GRPC_GOOGLE_OAUTH2_SERVICE_TOKEN_PATH "/oauth2/v3/token"
+#define GRPC_GOOGLE_OAUTH2_SERVICE_HOST "oauth2.googleapis.com"
+#define GRPC_GOOGLE_OAUTH2_SERVICE_TOKEN_PATH "/token"
 
 #define GRPC_SERVICE_ACCOUNT_POST_BODY_PREFIX                         \
   "grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Ajwt-bearer&" \
@@ -108,11 +110,7 @@ struct grpc_channel_credentials
   create_security_connector(
       grpc_core::RefCountedPtr<grpc_call_credentials> call_creds,
       const char* target, const grpc_channel_args* args,
-      grpc_channel_args** new_args) {
-    // Tell clang-tidy that call_creds cannot be passed as const-ref.
-    call_creds.reset();
-    GRPC_ABSTRACT;
-  }
+      grpc_channel_args** new_args) = 0;
 
   // Creates a version of the channel credentials without any attached call
   // credentials. This can be used in order to open a channel to a non-trusted
@@ -133,8 +131,6 @@ struct grpc_channel_credentials
 
   const char* type() const { return type_; }
 
-  GRPC_ABSTRACT_BASE_CLASS
-
  private:
   const char* type_;
 };
@@ -152,11 +148,10 @@ grpc_channel_credentials* grpc_channel_credentials_find_in_args(
 
 /* --- grpc_credentials_mdelem_array. --- */
 
-typedef struct {
+struct grpc_credentials_mdelem_array {
   grpc_mdelem* md = nullptr;
   size_t size = 0;
-} grpc_credentials_mdelem_array;
-
+};
 /// Takes a new ref to \a md.
 void grpc_credentials_mdelem_array_add(grpc_credentials_mdelem_array* list,
                                        grpc_mdelem md);
@@ -175,7 +170,11 @@ void grpc_credentials_mdelem_array_destroy(grpc_credentials_mdelem_array* list);
 struct grpc_call_credentials
     : public grpc_core::RefCounted<grpc_call_credentials> {
  public:
-  explicit grpc_call_credentials(const char* type) : type_(type) {}
+  explicit grpc_call_credentials(
+      const char* type,
+      grpc_security_level min_security_level = GRPC_PRIVACY_AND_INTEGRITY)
+      : type_(type), min_security_level_(min_security_level) {}
+
   virtual ~grpc_call_credentials() = default;
 
   // Returns true if completed synchronously, in which case \a error will
@@ -186,20 +185,27 @@ struct grpc_call_credentials
                                     grpc_auth_metadata_context context,
                                     grpc_credentials_mdelem_array* md_array,
                                     grpc_closure* on_request_metadata,
-                                    grpc_error** error) GRPC_ABSTRACT;
+                                    grpc_error** error) = 0;
 
   // Cancels a pending asynchronous operation started by
   // grpc_call_credentials_get_request_metadata() with the corresponding
   // value of \a md_array.
   virtual void cancel_get_request_metadata(
-      grpc_credentials_mdelem_array* md_array, grpc_error* error) GRPC_ABSTRACT;
+      grpc_credentials_mdelem_array* md_array, grpc_error* error) = 0;
+
+  virtual grpc_security_level min_security_level() const {
+    return min_security_level_;
+  }
+
+  virtual std::string debug_string() {
+    return "grpc_call_credentials did not provide debug string";
+  }
 
   const char* type() const { return type_; }
 
-  GRPC_ABSTRACT_BASE_CLASS
-
  private:
   const char* type_;
+  const grpc_security_level min_security_level_;
 };
 
 /* Metadata-only credentials with the specified key and value where
@@ -220,7 +226,7 @@ struct grpc_server_credentials
   virtual ~grpc_server_credentials() { DestroyProcessor(); }
 
   virtual grpc_core::RefCountedPtr<grpc_server_security_connector>
-  create_security_connector() GRPC_ABSTRACT;
+  create_security_connector() = 0;
 
   const char* type() const { return type_; }
 
@@ -229,8 +235,6 @@ struct grpc_server_credentials
   }
   void set_auth_metadata_processor(
       const grpc_auth_metadata_processor& processor);
-
-  GRPC_ABSTRACT_BASE_CLASS
 
  private:
   void DestroyProcessor() {
@@ -268,12 +272,12 @@ struct grpc_credentials_metadata_request {
 inline grpc_credentials_metadata_request*
 grpc_credentials_metadata_request_create(
     grpc_core::RefCountedPtr<grpc_call_credentials> creds) {
-  return grpc_core::New<grpc_credentials_metadata_request>(std::move(creds));
+  return new grpc_credentials_metadata_request(std::move(creds));
 }
 
 inline void grpc_credentials_metadata_request_destroy(
     grpc_credentials_metadata_request* r) {
-  grpc_core::Delete(r);
+  delete r;
 }
 
 #endif /* GRPC_CORE_LIB_SECURITY_CREDENTIALS_CREDENTIALS_H */

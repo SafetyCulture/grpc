@@ -50,12 +50,11 @@ char* gpr_strdup(const char* src) {
   return dst;
 }
 
-typedef struct {
+struct dump_out {
   size_t capacity;
   size_t length;
   char* data;
-} dump_out;
-
+};
 char* gpr_format_timespec(gpr_timespec tm) {
   char time_buffer[35];
   char ns_buffer[11];  // '.' + 9 digits of precision
@@ -126,7 +125,8 @@ static void asciidump(dump_out* out, const char* buf, size_t len) {
   }
 }
 
-char* gpr_dump(const char* buf, size_t len, uint32_t flags) {
+char* gpr_dump_return_len(const char* buf, size_t len, uint32_t flags,
+                          size_t* out_len) {
   dump_out out = dump_out_create();
   if (flags & GPR_DUMP_HEX) {
     hexdump(&out, buf, len);
@@ -135,7 +135,13 @@ char* gpr_dump(const char* buf, size_t len, uint32_t flags) {
     asciidump(&out, buf, len);
   }
   dump_out_append(&out, 0);
+  *out_len = out.length;
   return out.data;
+}
+
+char* gpr_dump(const char* buf, size_t len, uint32_t flags) {
+  size_t unused;
+  return gpr_dump_return_len(buf, len, flags, &unused);
 }
 
 int gpr_parse_bytes_to_uint32(const char* buf, size_t len, uint32_t* result) {
@@ -259,38 +265,20 @@ char* gpr_strjoin_sep(const char** strs, size_t nstrs, const char* sep,
   return out;
 }
 
-void gpr_strvec_init(gpr_strvec* sv) { memset(sv, 0, sizeof(*sv)); }
-
-void gpr_strvec_destroy(gpr_strvec* sv) {
-  size_t i;
-  for (i = 0; i < sv->count; i++) {
-    gpr_free(sv->strs[i]);
-  }
-  gpr_free(sv->strs);
-}
-
-void gpr_strvec_add(gpr_strvec* sv, char* str) {
-  if (sv->count == sv->capacity) {
-    sv->capacity = GPR_MAX(sv->capacity + 8, sv->capacity * 2);
-    sv->strs = static_cast<char**>(
-        gpr_realloc(sv->strs, sizeof(char*) * sv->capacity));
-  }
-  sv->strs[sv->count++] = str;
-}
-
-char* gpr_strvec_flatten(gpr_strvec* sv, size_t* final_length) {
-  return gpr_strjoin((const char**)sv->strs, sv->count, final_length);
-}
-
-int gpr_stricmp(const char* a, const char* b) {
+int gpr_strincmp(const char* a, const char* b, size_t n) {
   int ca, cb;
   do {
     ca = tolower(*a);
     cb = tolower(*b);
     ++a;
     ++b;
-  } while (ca == cb && ca && cb);
+    --n;
+  } while (ca == cb && ca != 0 && cb != 0 && n != 0);
   return ca - cb;
+}
+
+int gpr_stricmp(const char* a, const char* b) {
+  return gpr_strincmp(a, b, SIZE_MAX);
 }
 
 static void add_string_to_split(const char* beg, const char* end, char*** strs,

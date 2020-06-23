@@ -25,9 +25,10 @@
 #include <grpc/support/log.h>
 #include <grpc/support/string_util.h>
 
-#include "src/core/lib/gpr/host_port.h"
 #include "src/core/lib/gpr/string.h"
-#include "src/core/lib/security/security_connector/ssl_utils.h"
+#include "src/core/lib/gprpp/host_port.h"
+#include "src/core/lib/gprpp/memory.h"
+#include "src/core/lib/security/security_connector/ssl_utils_config.h"
 #include "test/core/end2end/cq_verifier.h"
 #include "test/core/util/port.h"
 #include "test/core/util/subprocess.h"
@@ -144,16 +145,16 @@ int main(int argc, char** argv) {
   gpr_asprintf(&args[0], "%s/bad_ssl_%s_server%s", root, test,
                gpr_subprocess_binary_extension());
   args[1] = const_cast<char*>("--bind");
-  gpr_join_host_port(&args[2], "::", port);
+  std::string joined = grpc_core::JoinHostPort("::", port);
+  args[2] = const_cast<char*>(joined.c_str());
   svr = gpr_subprocess_create(4, (const char**)args);
   gpr_free(args[0]);
 
   for (i = 3; i <= 4; i++) {
     grpc_init();
     run_test(args[2], i);
-    grpc_shutdown();
+    grpc_shutdown_blocking();
   }
-  gpr_free(args[2]);
 
   gpr_subprocess_interrupt(svr);
   status = gpr_subprocess_join(svr);

@@ -40,7 +40,7 @@
 #include "src/core/lib/iomgr/tcp_windows.h"
 #include "src/core/lib/iomgr/timer.h"
 
-typedef struct {
+struct async_connect {
   grpc_closure* on_done;
   gpr_mu mu;
   grpc_winsocket* socket;
@@ -51,8 +51,7 @@ typedef struct {
   grpc_closure on_connect;
   grpc_endpoint** endpoint;
   grpc_channel_args* channel_args;
-} async_connect;
-
+};
 static void async_connect_unlock_and_cleanup(async_connect* ac,
                                              grpc_winsocket* socket) {
   int done = (--ac->refs == 0);
@@ -117,7 +116,7 @@ static void on_connect(void* acp, grpc_error* error) {
   async_connect_unlock_and_cleanup(ac, socket);
   /* If the connection was aborted, the callback was already called when
      the deadline was met. */
-  GRPC_CLOSURE_SCHED(on_done, error);
+  grpc_core::ExecCtx::Run(DEBUG_LOCATION, on_done, error);
 }
 
 /* Tries to issue one async connection, then schedules both an IOCP
@@ -225,7 +224,7 @@ failure:
   } else if (sock != INVALID_SOCKET) {
     closesocket(sock);
   }
-  GRPC_CLOSURE_SCHED(on_done, final_error);
+  grpc_core::ExecCtx::Run(DEBUG_LOCATION, on_done, final_error);
 }
 
 grpc_tcp_client_vtable grpc_windows_tcp_client_vtable = {tcp_connect};

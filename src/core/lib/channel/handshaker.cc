@@ -20,6 +20,9 @@
 
 #include <string.h>
 
+#include "absl/strings/str_format.h"
+
+#include <grpc/impl/codegen/slice.h>
 #include <grpc/support/alloc.h>
 #include <grpc/support/log.h>
 #include <grpc/support/string_util.h>
@@ -36,19 +39,16 @@ TraceFlag grpc_handshaker_trace(false, "handshaker");
 
 namespace {
 
-char* HandshakerArgsString(HandshakerArgs* args) {
-  char* args_str = grpc_channel_args_string(args->args);
+std::string HandshakerArgsString(HandshakerArgs* args) {
   size_t num_args = args->args != nullptr ? args->args->num_args : 0;
   size_t read_buffer_length =
       args->read_buffer != nullptr ? args->read_buffer->length : 0;
-  char* str;
-  gpr_asprintf(&str,
-               "{endpoint=%p, args=%p {size=%" PRIuPTR
-               ": %s}, read_buffer=%p (length=%" PRIuPTR "), exit_early=%d}",
-               args->endpoint, args->args, num_args, args_str,
-               args->read_buffer, read_buffer_length, args->exit_early);
-  gpr_free(args_str);
-  return str;
+  return absl::StrFormat(
+      "{endpoint=%p, args=%p {size=%" PRIuPTR
+      ": %s}, read_buffer=%p (length=%" PRIuPTR "), exit_early=%d}",
+      args->endpoint, args->args, num_args,
+      grpc_channel_args_string(args->args), args->read_buffer,
+      read_buffer_length, args->exit_early);
 }
 
 }  // namespace
@@ -126,12 +126,11 @@ void HandshakeManager::Shutdown(grpc_error* why) {
 // Returns true if we've scheduled the on_handshake_done callback.
 bool HandshakeManager::CallNextHandshakerLocked(grpc_error* error) {
   if (GRPC_TRACE_FLAG_ENABLED(grpc_handshaker_trace)) {
-    char* args_str = HandshakerArgsString(&args_);
     gpr_log(GPR_INFO,
             "handshake_manager %p: error=%s shutdown=%d index=%" PRIuPTR
             ", args=%s",
-            this, grpc_error_string(error), is_shutdown_, index_, args_str);
-    gpr_free(args_str);
+            this, grpc_error_string(error), is_shutdown_, index_,
+            HandshakerArgsString(&args_).c_str());
   }
   GPR_ASSERT(index_ <= handshakers_.size());
   // If we got an error or we've been shut down or we're exiting early or
@@ -168,7 +167,7 @@ bool HandshakeManager::CallNextHandshakerLocked(grpc_error* error) {
     // Cancel deadline timer, since we're invoking the on_handshake_done
     // callback now.
     grpc_timer_cancel(&deadline_timer_);
-    GRPC_CLOSURE_SCHED(&on_handshake_done_, error);
+    ExecCtx::Run(DEBUG_LOCATION, &on_handshake_done_, error);
     is_shutdown_ = true;
   } else {
     auto handshaker = handshakers_[index_];
@@ -226,6 +225,11 @@ void HandshakeManager::DoHandshake(grpc_endpoint* endpoint,
     args_.read_buffer =
         static_cast<grpc_slice_buffer*>(gpr_malloc(sizeof(*args_.read_buffer)));
     grpc_slice_buffer_init(args_.read_buffer);
+    if (acceptor != nullptr && acceptor->external_connection &&
+        acceptor->pending_data != nullptr) {
+      grpc_slice_buffer_swap(args_.read_buffer,
+                             &(acceptor->pending_data->data.raw.slice_buffer));
+    }
     // Initialize state needed for calling handshakers.
     acceptor_ = acceptor;
     GRPC_CLOSURE_INIT(&call_next_handshaker_,

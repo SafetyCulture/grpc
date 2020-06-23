@@ -120,7 +120,9 @@ class LoggingInterceptor : public experimental::Interceptor {
             experimental::InterceptionHookPoints::POST_RECV_MESSAGE)) {
       EchoResponse* resp =
           static_cast<EchoResponse*>(methods->GetRecvMessage());
-      EXPECT_TRUE(resp->message().find("Hello") == 0);
+      if (resp != nullptr) {
+        EXPECT_TRUE(resp->message().find("Hello") == 0);
+      }
     }
     if (methods->QueryInterceptionHookPoint(
             experimental::InterceptionHookPoints::POST_RECV_CLOSE)) {
@@ -145,7 +147,7 @@ class LoggingInterceptorFactory
 // Test if SendMessage function family works as expected for sync/callback apis
 class SyncSendMessageTester : public experimental::Interceptor {
  public:
-  SyncSendMessageTester(experimental::ServerRpcInfo* info) {}
+  SyncSendMessageTester(experimental::ServerRpcInfo* /*info*/) {}
 
   void Intercept(experimental::InterceptorBatchMethods* methods) override {
     if (methods->QueryInterceptionHookPoint(
@@ -175,7 +177,7 @@ class SyncSendMessageTesterFactory
 // Test if SendMessage function family works as expected for sync/callback apis
 class SyncSendMessageVerifier : public experimental::Interceptor {
  public:
-  SyncSendMessageVerifier(experimental::ServerRpcInfo* info) {}
+  SyncSendMessageVerifier(experimental::ServerRpcInfo* /*info*/) {}
 
   void Intercept(experimental::InterceptorBatchMethods* methods) override {
     if (methods->QueryInterceptionHookPoint(

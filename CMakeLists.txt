@@ -860,7 +860,7 @@ if(gRPC_BUILD_TESTS)
 endif()
 
 
-add_library(address_sorting
+add_library(address_sorting SHARED
   third_party/address_sorting/address_sorting.c
   third_party/address_sorting/address_sorting_posix.c
   third_party/address_sorting/address_sorting_windows.c
@@ -1173,7 +1173,7 @@ target_link_libraries(end2end_tests
 
 endif()
 
-add_library(gpr
+add_library(gpr SHARED
   src/core/lib/gpr/alloc.cc
   src/core/lib/gpr/atm.cc
   src/core/lib/gpr/cpu_iphone.cc
@@ -1318,7 +1318,7 @@ if(gRPC_INSTALL)
 endif()
 
 
-add_library(grpc
+add_library(grpc EXCLUDE_FROM_ALL
   src/core/ext/filters/census/grpc_context.cc
   src/core/ext/filters/client_channel/backend_metric.cc
   src/core/ext/filters/client_channel/backup_poller.cc
@@ -1817,7 +1817,7 @@ endif()
 
 if(gRPC_BUILD_CSHARP_EXT)
 
-add_library(grpc_csharp_ext SHARED
+add_library(grpc_csharp_ext SHARED EXCLUDE_FROM_ALL
   src/csharp/ext/grpc_csharp_ext.c
 )
 
@@ -2479,7 +2479,7 @@ endif()
 
 endif()
 
-add_library(grpc++
+add_library(grpc++ SHARED
   src/cpp/client/channel_cc.cc
   src/cpp/client/client_context.cc
   src/cpp/client/client_interceptor.cc
@@ -3180,7 +3180,7 @@ target_link_libraries(grpc++_test_util
 
 endif()
 
-add_library(grpc++_unsecure
+add_library(grpc++_unsecure EXCLUDE_FROM_ALL
   src/cpp/client/channel_cc.cc
   src/cpp/client/client_context.cc
   src/cpp/client/client_interceptor.cc
@@ -3492,7 +3492,7 @@ if(gRPC_INSTALL)
 endif()
 
 
-add_library(grpc_plugin_support
+add_library(grpc_plugin_support EXCLUDE_FROM_ALL
   src/compiler/cpp_generator.cc
   src/compiler/csharp_generator.cc
   src/compiler/node_generator.cc

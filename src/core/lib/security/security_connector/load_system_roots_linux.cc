@@ -153,15 +153,17 @@ grpc_slice LoadSystemRootCerts() {
   // If the custom directory is empty/invalid/not specified, fallback to
   // distribution-specific directory.
   if (GRPC_SLICE_IS_EMPTY(result)) {
-    result = GetSystemRootCerts();
-  }
-  if (GRPC_SLICE_IS_EMPTY(result)) {
+    gpr_log(GPR_ERROR, "load user certificates");
     for (size_t i = 0; i < GPR_ARRAY_SIZE(kLinuxCertDirectories); i++) {
       result = CreateRootCertsBundle(kLinuxCertDirectories[i]);
       if (!GRPC_SLICE_IS_EMPTY(result)) {
         break;
       }
     }
+  }
+  if (GRPC_SLICE_IS_EMPTY(result)) {
+    gpr_log(GPR_ERROR, "load system certificates");
+    result = GetSystemRootCerts();
   }
   return result;
 }

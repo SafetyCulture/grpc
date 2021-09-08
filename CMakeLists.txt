@@ -248,6 +248,11 @@ else()
   set(_gRPC_CORE_NOSTDCXX_FLAGS "")
 endif()
 
+option(GPR_MUSL_LIBC_COMPAT "Build GRPC Libc Compat" OFF)
+if(GPR_MUSL_LIBC_COMPAT)
+  add_definitions(-DGPR_MUSL_LIBC_COMPAT)
+endif()
+
 if (gRPC_XDS_USER_AGENT_IS_CSHARP)
   # The value of the defines needs to contain quotes.
   # See https://github.com/grpc/grpc/blob/fbf32836a418cc84f58786700273b65cb9174e1d/src/core/ext/xds/xds_api.cc#L854

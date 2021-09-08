@@ -216,6 +216,11 @@ else()
   set(_gRPC_CORE_NOSTDCXX_FLAGS "")
 endif()
 
+option(GPR_MUSL_LIBC_COMPAT "Build GRPC Libc Compat" OFF)
+if(GPR_MUSL_LIBC_COMPAT)
+  add_definitions(-DGPR_MUSL_LIBC_COMPAT)
+endif()
+
 include(cmake/abseil-cpp.cmake)
 include(cmake/address_sorting.cmake)
 include(cmake/benchmark.cmake)

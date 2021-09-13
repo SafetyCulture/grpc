@@ -23,16 +23,18 @@
 
 #include <string.h>
 
+#include <string>
+
 #include <grpc/grpc.h>
 #include <grpc/grpc_security.h>
 #include <grpc/support/sync.h>
-#include "src/core/lib/transport/metadata_batch.h"
 
 #include "src/core/lib/gprpp/ref_counted.h"
 #include "src/core/lib/http/httpcli.h"
 #include "src/core/lib/http/parser.h"
 #include "src/core/lib/iomgr/polling_entity.h"
 #include "src/core/lib/security/security_connector/security_connector.h"
+#include "src/core/lib/transport/metadata_batch.h"
 
 struct grpc_http_response;
 
@@ -79,13 +81,13 @@ typedef enum {
 /* --- Google utils --- */
 
 /* It is the caller's responsibility to gpr_free the result if not NULL. */
-char* grpc_get_well_known_google_credentials_file_path(void);
+std::string grpc_get_well_known_google_credentials_file_path(void);
 
 /* Implementation function for the different platforms. */
-char* grpc_get_well_known_google_credentials_file_path_impl(void);
+std::string grpc_get_well_known_google_credentials_file_path_impl(void);
 
 /* Override for testing only. Not thread-safe */
-typedef char* (*grpc_well_known_credentials_path_getter)(void);
+typedef std::string (*grpc_well_known_credentials_path_getter)(void);
 void grpc_override_well_known_credentials_path_getter(
     grpc_well_known_credentials_path_getter getter);
 
@@ -100,7 +102,7 @@ struct grpc_channel_credentials
     : grpc_core::RefCounted<grpc_channel_credentials> {
  public:
   explicit grpc_channel_credentials(const char* type) : type_(type) {}
-  virtual ~grpc_channel_credentials() = default;
+  ~grpc_channel_credentials() override = default;
 
   // Creates a security connector for the channel. May also create new channel
   // args for the channel to be used in place of the passed in const args if
@@ -175,7 +177,7 @@ struct grpc_call_credentials
       grpc_security_level min_security_level = GRPC_PRIVACY_AND_INTEGRITY)
       : type_(type), min_security_level_(min_security_level) {}
 
-  virtual ~grpc_call_credentials() = default;
+  ~grpc_call_credentials() override = default;
 
   // Returns true if completed synchronously, in which case \a error will
   // be set to indicate the result.  Otherwise, \a on_request_metadata will
@@ -185,13 +187,13 @@ struct grpc_call_credentials
                                     grpc_auth_metadata_context context,
                                     grpc_credentials_mdelem_array* md_array,
                                     grpc_closure* on_request_metadata,
-                                    grpc_error** error) = 0;
+                                    grpc_error_handle* error) = 0;
 
   // Cancels a pending asynchronous operation started by
   // grpc_call_credentials_get_request_metadata() with the corresponding
   // value of \a md_array.
   virtual void cancel_get_request_metadata(
-      grpc_credentials_mdelem_array* md_array, grpc_error* error) = 0;
+      grpc_credentials_mdelem_array* md_array, grpc_error_handle error) = 0;
 
   virtual grpc_security_level min_security_level() const {
     return min_security_level_;
@@ -223,10 +225,11 @@ struct grpc_server_credentials
  public:
   explicit grpc_server_credentials(const char* type) : type_(type) {}
 
-  virtual ~grpc_server_credentials() { DestroyProcessor(); }
+  ~grpc_server_credentials() override { DestroyProcessor(); }
 
+  // Ownership of \a args is not passed.
   virtual grpc_core::RefCountedPtr<grpc_server_security_connector>
-  create_security_connector() = 0;
+  create_security_connector(const grpc_channel_args* args) = 0;
 
   const char* type() const { return type_; }
 

@@ -22,21 +22,19 @@
 #include <condition_variable>
 #include <memory>
 #include <mutex>
+#include <string>
+#include <thread>
+
+#include <gtest/gtest.h>
 
 #include <grpc/grpc.h>
 #include <grpc/support/log.h>
 #include <grpcpp/alarm.h>
 #include <grpcpp/security/credentials.h>
 #include <grpcpp/server_context.h>
-#include <gtest/gtest.h>
-
-#include <string>
-#include <thread>
 
 #include "src/proto/grpc/testing/echo.grpc.pb.h"
 #include "test/cpp/util/string_ref_helper.h"
-
-using std::chrono::system_clock;
 
 namespace grpc {
 namespace testing {
@@ -44,6 +42,7 @@ namespace testing {
 const int kServerDefaultResponseStreamsToSend = 3;
 const char* const kServerResponseStreamsToSend = "server_responses_to_send";
 const char* const kServerTryCancelRequest = "server_try_cancel";
+const char* const kClientTryCancelRequest = "client_try_cancel";
 const char* const kDebugInfoTrailerKey = "debug-info-bin";
 const char* const kServerFinishAfterNReads = "server_finish_after_n_reads";
 const char* const kServerUseCoalescingApi = "server_use_coalescing_api";
@@ -60,19 +59,18 @@ typedef enum {
 namespace internal {
 // When echo_deadline is requested, deadline seen in the ServerContext is set in
 // the response in seconds.
-void MaybeEchoDeadline(experimental::ServerContextBase* context,
-                       const EchoRequest* request, EchoResponse* response);
+void MaybeEchoDeadline(ServerContextBase* context, const EchoRequest* request,
+                       EchoResponse* response);
 
-void CheckServerAuthContext(
-    const experimental::ServerContextBase* context,
-    const grpc::string& expected_transport_security_type,
-    const grpc::string& expected_client_identity);
+void CheckServerAuthContext(const ServerContextBase* context,
+                            const std::string& expected_transport_security_type,
+                            const std::string& expected_client_identity);
 
 // Returns the number of pairs in metadata that exactly match the given
 // key-value pair. Returns -1 if the pair wasn't found.
 int MetadataMatchCount(
     const std::multimap<grpc::string_ref, grpc::string_ref>& metadata,
-    const grpc::string& key, const grpc::string& value);
+    const std::string& key, const std::string& value);
 
 int GetIntValueFromMetadataHelper(
     const char* key,
@@ -120,8 +118,8 @@ template <typename RpcService>
 class TestMultipleServiceImpl : public RpcService {
  public:
   TestMultipleServiceImpl() : signal_client_(false), host_() {}
-  explicit TestMultipleServiceImpl(const grpc::string& host)
-      : signal_client_(false), host_(new grpc::string(host)) {}
+  explicit TestMultipleServiceImpl(const std::string& host)
+      : signal_client_(false), host_(new std::string(host)) {}
 
   Status Echo(ServerContext* context, const EchoRequest* request,
               EchoResponse* response) {
@@ -168,12 +166,17 @@ class TestMultipleServiceImpl : public RpcService {
       {
         std::unique_lock<std::mutex> lock(mu_);
         signal_client_ = true;
+        ++rpcs_waiting_for_client_cancel_;
       }
       while (!context->IsCancelled()) {
         gpr_sleep_until(gpr_time_add(
             gpr_now(GPR_CLOCK_REALTIME),
             gpr_time_from_micros(request->param().client_cancel_after_us(),
                                  GPR_TIMESPAN)));
+      }
+      {
+        std::unique_lock<std::mutex> lock(mu_);
+        --rpcs_waiting_for_client_cancel_;
       }
       return Status::CANCELLED;
     } else if (request->has_param() &&
@@ -207,7 +210,7 @@ class TestMultipleServiceImpl : public RpcService {
       // Terminate rpc with error and debug info in trailer.
       if (request->param().debug_info().stack_entries_size() ||
           !request->param().debug_info().detail().empty()) {
-        grpc::string serialized_debug_info =
+        std::string serialized_debug_info =
             request->param().debug_info().SerializeAsString();
         context->AddTrailingMetadata(kDebugInfoTrailerKey,
                                      serialized_debug_info);
@@ -224,7 +227,7 @@ class TestMultipleServiceImpl : public RpcService {
     if (request->has_param() &&
         request->param().response_message_length() > 0) {
       response->set_message(
-          grpc::string(request->param().response_message_length(), '\0'));
+          std::string(request->param().response_message_length(), '\0'));
     }
     if (request->has_param() && request->param().echo_peer()) {
       response->mutable_param()->set_peer(context->peer());
@@ -339,7 +342,7 @@ class TestMultipleServiceImpl : public RpcService {
     }
 
     for (int i = 0; i < server_responses_to_send; i++) {
-      response.set_message(request->message() + grpc::to_string(i));
+      response.set_message(request->message() + std::to_string(i));
       if (i == server_responses_to_send - 1 && server_coalescing_api != 0) {
         writer->WriteLast(response, WriteOptions());
       } else {
@@ -400,6 +403,7 @@ class TestMultipleServiceImpl : public RpcService {
       response.set_message(request.message());
       if (read_counts == server_write_last) {
         stream->WriteLast(response, WriteOptions());
+        break;
       } else {
         stream->Write(response);
       }
@@ -426,39 +430,42 @@ class TestMultipleServiceImpl : public RpcService {
   }
   void ClientWaitUntilRpcStarted() { signaller_.ClientWaitUntilRpcStarted(); }
   void SignalServerToContinue() { signaller_.SignalServerToContinue(); }
+  uint64_t RpcsWaitingForClientCancel() {
+    std::unique_lock<std::mutex> lock(mu_);
+    return rpcs_waiting_for_client_cancel_;
+  }
 
  private:
   bool signal_client_;
   std::mutex mu_;
   TestServiceSignaller signaller_;
-  std::unique_ptr<grpc::string> host_;
+  std::unique_ptr<std::string> host_;
+  uint64_t rpcs_waiting_for_client_cancel_ = 0;
 };
 
 class CallbackTestServiceImpl
-    : public ::grpc::testing::EchoTestService::ExperimentalCallbackService {
+    : public ::grpc::testing::EchoTestService::CallbackService {
  public:
   CallbackTestServiceImpl() : signal_client_(false), host_() {}
-  explicit CallbackTestServiceImpl(const grpc::string& host)
-      : signal_client_(false), host_(new grpc::string(host)) {}
+  explicit CallbackTestServiceImpl(const std::string& host)
+      : signal_client_(false), host_(new std::string(host)) {}
 
-  experimental::ServerUnaryReactor* Echo(
-      experimental::CallbackServerContext* context, const EchoRequest* request,
-      EchoResponse* response) override;
+  ServerUnaryReactor* Echo(CallbackServerContext* context,
+                           const EchoRequest* request,
+                           EchoResponse* response) override;
 
-  experimental::ServerUnaryReactor* CheckClientInitialMetadata(
-      experimental::CallbackServerContext* context, const SimpleRequest*,
-      SimpleResponse*) override;
+  ServerUnaryReactor* CheckClientInitialMetadata(CallbackServerContext* context,
+                                                 const SimpleRequest*,
+                                                 SimpleResponse*) override;
 
-  experimental::ServerReadReactor<EchoRequest>* RequestStream(
-      experimental::CallbackServerContext* context,
-      EchoResponse* response) override;
+  ServerReadReactor<EchoRequest>* RequestStream(
+      CallbackServerContext* context, EchoResponse* response) override;
 
-  experimental::ServerWriteReactor<EchoResponse>* ResponseStream(
-      experimental::CallbackServerContext* context,
-      const EchoRequest* request) override;
+  ServerWriteReactor<EchoResponse>* ResponseStream(
+      CallbackServerContext* context, const EchoRequest* request) override;
 
-  experimental::ServerBidiReactor<EchoRequest, EchoResponse>* BidiStream(
-      experimental::CallbackServerContext* context) override;
+  ServerBidiReactor<EchoRequest, EchoResponse>* BidiStream(
+      CallbackServerContext* context) override;
 
   // Unimplemented is left unimplemented to test the returned error.
   bool signal_client() {
@@ -472,7 +479,7 @@ class CallbackTestServiceImpl
   bool signal_client_;
   std::mutex mu_;
   TestServiceSignaller signaller_;
-  std::unique_ptr<grpc::string> host_;
+  std::unique_ptr<std::string> host_;
 };
 
 using TestServiceImpl =

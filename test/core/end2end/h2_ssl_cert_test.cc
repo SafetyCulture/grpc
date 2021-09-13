@@ -16,10 +16,10 @@
  *
  */
 
-#include "test/core/end2end/end2end_tests.h"
-
 #include <stdio.h>
 #include <string.h>
+
+#include <gtest/gtest.h>
 
 #include <grpc/support/alloc.h>
 #include <grpc/support/log.h>
@@ -33,16 +33,15 @@
 #include "src/core/lib/security/security_connector/ssl_utils_config.h"
 #include "test/core/end2end/cq_verifier.h"
 #include "test/core/end2end/data/ssl_test_data.h"
+#include "test/core/end2end/end2end_tests.h"
 #include "test/core/util/port.h"
 #include "test/core/util/test_config.h"
-
-#include <gtest/gtest.h>
 
 extern "C" {
 #include <openssl/crypto.h>
 }
 
-static grpc::string test_server1_key_id;
+static std::string test_server1_key_id;
 
 namespace grpc {
 namespace testing {

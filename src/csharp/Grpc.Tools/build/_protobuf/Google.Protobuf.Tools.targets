@@ -83,7 +83,7 @@
 
     <Error Condition=" '$(DisableProtobufDesignTimeBuild)' != 'true' and '$(PROTOBUF_PROTOC)' == ''
                         and ( '$(Protobuf_ToolsOs)' == '' or '$(Protobuf_ToolsCpu)' == '' ) "
-      Text="Google.Protobuf.Tools cannot determine host OS and CPU.&#10;Use environment variables PROTOBUF_TOOLS_OS={linux|macosx|windows} and PROTOBUF_TOOLS_CPU={x86|x64} to try the closest match to your system.&#10;You may also set PROTOBUF_PROTOC to specify full path to the host-provided compiler (v3.5+ is required)." />
+      Text="Google.Protobuf.Tools cannot determine host OS and CPU.&#10;Use environment variables PROTOBUF_TOOLS_OS={linux|macosx|windows} and PROTOBUF_TOOLS_CPU={x86|x64|arm64} to try the closest match to your system.&#10;You may also set PROTOBUF_PROTOC to specify full path to the host-provided compiler (v3.5+ is required)." />
   </Target>
 
   <!--================================================================================
@@ -135,6 +135,7 @@
       <!-- Out-of-project files will have respective ProtoRoot='%(RelativeDir)'. -->
       <Protobuf_Rooted Include="@(_Protobuf_NoRootElsewhere)">
         <ProtoRoot>%(RelativeDir)</ProtoRoot>
+        <ProtoRoot Condition=" '$(Protobuf_ProtoRoot)' != '' ">$(Protobuf_ProtoRoot)</ProtoRoot>
       </Protobuf_Rooted>
     </ItemGroup>
   </Target>
@@ -167,7 +168,13 @@
                           Protobuf="@(Protobuf_Compile)"
                           Generator="$(Protobuf_Generator)">
       <Output TaskParameter="PossibleOutputs" ItemName="Protobuf_ExpectedOutputs" />
+      <Output TaskParameter="PatchedProtobuf" ItemName="_PatchedProtobuf" />
     </ProtoCompilerOutputs>
+    <!-- Replace Protobuf_Compile with PatchedProtobuf. -->
+    <ItemGroup>
+       <Protobuf_Compile Remove="@(_PatchedProtobuf)"/>
+       <Protobuf_Compile Include ="@(_PatchedProtobuf)"/>
+    </ItemGroup>
     <!-- Read any dependency files from previous compiles. -->
     <ProtoReadDependencies Condition=" '$(Protobuf_DepFilesPath)' != '' and '$(DisableProtobufDesignTimeBuild)' != 'true' "
                            Protobuf="@(Protobuf_Compile)"
@@ -281,6 +288,7 @@
       GrpcPluginExe="%(_Protobuf_OutOfDateProto.GrpcPluginExe)"
       GrpcOutputDir="%(_Protobuf_OutOfDateProto.GrpcOutputDir)"
       GrpcOutputOptions="%(_Protobuf_OutOfDateProto._GrpcOutputOptions)"
+      AdditionalProtocArguments="%(_Protobuf_OutOfDateProto.AdditionalProtocArguments)"
     >
       <Output TaskParameter="GeneratedFiles" ItemName="_Protobuf_GeneratedFiles"/>
     </ProtoCompile>

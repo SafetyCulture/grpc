@@ -15,23 +15,19 @@
  * limitations under the License.
  *
  */
-
-#include <grpc/support/port_platform.h>
-
 #ifndef GRPC_CORE_LIB_IOMGR_PORT_H
 #define GRPC_CORE_LIB_IOMGR_PORT_H
 
-#ifdef GRPC_UV
-#ifndef GRPC_CUSTOM_SOCKET
-#define GRPC_CUSTOM_SOCKET
-#endif
-#endif
+#include <grpc/support/port_platform.h>
+
 /* This needs to be separate from the other conditions because it needs to
  * apply to custom sockets too */
 #ifdef GPR_WINDOWS
 #define GRPC_ARES_RESOLVE_LOCALHOST_MANUALLY 1
 #endif
 #if defined(GRPC_CUSTOM_SOCKET)
+// Do Nothing
+#elif defined(GRPC_USE_EVENT_ENGINE)
 // Do Nothing
 #elif defined(GPR_WINDOWS)
 #define GRPC_WINSOCK_SOCKET 1
@@ -77,11 +73,6 @@
 #if __GLIBC_PREREQ(2, 10)
 #define GRPC_LINUX_SOCKETUTILS 1
 #endif
-#endif
-#ifdef LINUX_VERSION_CODE
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 37)
-#define GRPC_HAVE_TCP_USER_TIMEOUT
-#ifdef __GLIBC_PREREQ
 #if !(__GLIBC_PREREQ(2, 17))
 /*
  * TCP_USER_TIMEOUT wasn't imported to glibc until 2.17. Use Linux system
@@ -89,9 +80,7 @@
  */
 #define GRPC_LINUX_TCP_H 1
 #endif /* __GLIBC_PREREQ(2, 17) */
-#endif /* ifdef __GLIBC_PREREQ */
-#endif /* LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 37) */
-#endif /* LINUX_VERSION_CODE */
+#endif
 #ifndef __GLIBC__
 #define GRPC_LINUX_EPOLL 1
 #define GRPC_LINUX_EPOLL_CREATE1 1
@@ -196,10 +185,11 @@
 #endif
 
 #if defined(GRPC_POSIX_SOCKET) + defined(GRPC_WINSOCK_SOCKET) + \
-        defined(GRPC_CUSTOM_SOCKET) + defined(GRPC_CFSTREAM) != \
+        defined(GRPC_CUSTOM_SOCKET) + defined(GRPC_CFSTREAM) +  \
+        defined(GRPC_USE_EVENT_ENGINE) !=                       \
     1
 #error \
-    "Must define exactly one of GRPC_POSIX_SOCKET, GRPC_WINSOCK_SOCKET, GRPC_CUSTOM_SOCKET"
+    "Must define exactly one of GRPC_POSIX_SOCKET, GRPC_WINSOCK_SOCKET, GRPC_CUSTOM_SOCKET, GRPC_CFSTREAM, GRPC_USE_EVENT_ENGINE"
 #endif
 
 #ifdef GRPC_POSIX_SOCKET

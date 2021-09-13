@@ -20,12 +20,13 @@
 
 #include "src/core/lib/security/security_connector/ssl_utils.h"
 
+#include <vector>
+
+#include "absl/strings/str_cat.h"
+
 #include <grpc/slice_buffer.h>
 #include <grpc/support/alloc.h>
 #include <grpc/support/log.h>
-#include <grpc/support/string_util.h>
-
-#include <vector>
 
 #include "src/core/ext/transport/chttp2/alpn/alpn.h"
 #include "src/core/lib/channel/channel_args.h"
@@ -40,11 +41,13 @@
 
 /* -- Constants. -- */
 
-#ifndef INSTALL_PREFIX
-static const char* installed_roots_path = "/usr/share/grpc/roots.pem";
-#else
+#if defined(GRPC_ROOT_PEM_PATH)
+static const char* installed_roots_path = GRPC_ROOT_PEM_PATH;
+#elif defined(INSTALL_PREFIX)
 static const char* installed_roots_path =
-    INSTALL_PREFIX "/share/grpc/roots.pem";
+    INSTALL_PREFIX "/usr/share/grpc/roots.pem";
+#else
+static const char* installed_roots_path = "/usr/share/grpc/roots.pem";
 #endif
 
 #ifndef TSI_OPENSSL_ALPN_SUPPORT
@@ -67,6 +70,9 @@ static const char* cipher_suites = nullptr;
 // All cipher suites for default are compliant with HTTP2.
 GPR_GLOBAL_CONFIG_DEFINE_STRING(
     grpc_ssl_cipher_suites,
+    "TLS_AES_128_GCM_SHA256:"
+    "TLS_AES_256_GCM_SHA384:"
+    "TLS_CHACHA20_POLY1305_SHA256:"
     "ECDHE-ECDSA-AES128-GCM-SHA256:"
     "ECDHE-ECDSA-AES256-GCM-SHA384:"
     "ECDHE-RSA-AES128-GCM-SHA256:"
@@ -134,7 +140,19 @@ grpc_get_tsi_client_certificate_request_type(
   }
 }
 
-grpc_error* grpc_ssl_check_alpn(const tsi_peer* peer) {
+tsi_tls_version grpc_get_tsi_tls_version(grpc_tls_version tls_version) {
+  switch (tls_version) {
+    case grpc_tls_version::TLS1_2:
+      return tsi_tls_version::TSI_TLS1_2;
+    case grpc_tls_version::TLS1_3:
+      return tsi_tls_version::TSI_TLS1_3;
+    default:
+      gpr_log(GPR_INFO, "Falling back to TLS 1.2.");
+      return tsi_tls_version::TSI_TLS1_2;
+  }
+}
+
+grpc_error_handle grpc_ssl_check_alpn(const tsi_peer* peer) {
 #if TSI_OPENSSL_ALPN_SUPPORT
   /* Check the ALPN if ALPN is supported. */
   const tsi_peer_property* p =
@@ -151,16 +169,12 @@ grpc_error* grpc_ssl_check_alpn(const tsi_peer* peer) {
   return GRPC_ERROR_NONE;
 }
 
-grpc_error* grpc_ssl_check_peer_name(absl::string_view peer_name,
-                                     const tsi_peer* peer) {
+grpc_error_handle grpc_ssl_check_peer_name(absl::string_view peer_name,
+                                           const tsi_peer* peer) {
   /* Check the peer name if specified. */
   if (!peer_name.empty() && !grpc_ssl_host_matches_name(peer, peer_name)) {
-    char* msg;
-    gpr_asprintf(&msg, "Peer name %s is not in peer certificate",
-                 peer_name.data());
-    grpc_error* error = GRPC_ERROR_CREATE_FROM_COPIED_STRING(msg);
-    gpr_free(msg);
-    return error;
+    return GRPC_ERROR_CREATE_FROM_CPP_STRING(
+        absl::StrCat("Peer name ", peer_name, " is not in peer certificate"));
   }
   return GRPC_ERROR_NONE;
 }
@@ -169,7 +183,7 @@ bool grpc_ssl_check_call_host(absl::string_view host,
                               absl::string_view target_name,
                               absl::string_view overridden_target_name,
                               grpc_auth_context* auth_context,
-                              grpc_error** error) {
+                              grpc_error_handle* error) {
   grpc_security_status status = GRPC_SECURITY_ERROR;
   tsi_peer peer = grpc_shallow_peer_from_ssl_auth_context(auth_context);
   if (grpc_ssl_host_matches_name(&peer, host)) status = GRPC_SECURITY_OK;
@@ -257,7 +271,8 @@ grpc_core::RefCountedPtr<grpc_auth_context> grpc_ssl_peer_to_auth_context(
       transport_security_type);
   const char* spiffe_data = nullptr;
   size_t spiffe_length = 0;
-  int spiffe_id_count = 0;
+  int uri_count = 0;
+  bool has_spiffe_id = false;
   for (i = 0; i < peer->property_count; i++) {
     const tsi_peer_property* prop = &peer->properties[i];
     if (prop->name == nullptr) continue;
@@ -289,29 +304,42 @@ grpc_core::RefCountedPtr<grpc_auth_context> grpc_ssl_peer_to_auth_context(
       grpc_auth_context_add_property(
           ctx.get(), GRPC_TRANSPORT_SECURITY_LEVEL_PROPERTY_NAME,
           prop->value.data, prop->value.length);
+    } else if (strcmp(prop->name, TSI_X509_DNS_PEER_PROPERTY) == 0) {
+      grpc_auth_context_add_property(ctx.get(), GRPC_PEER_DNS_PROPERTY_NAME,
+                                     prop->value.data, prop->value.length);
     } else if (strcmp(prop->name, TSI_X509_URI_PEER_PROPERTY) == 0) {
+      grpc_auth_context_add_property(ctx.get(), GRPC_PEER_URI_PROPERTY_NAME,
+                                     prop->value.data, prop->value.length);
+      uri_count++;
       absl::string_view spiffe_id(prop->value.data, prop->value.length);
       if (IsSpiffeId(spiffe_id)) {
         spiffe_data = prop->value.data;
         spiffe_length = prop->value.length;
-        spiffe_id_count += 1;
+        has_spiffe_id = true;
       }
+    } else if (strcmp(prop->name, TSI_X509_EMAIL_PEER_PROPERTY) == 0) {
+      grpc_auth_context_add_property(ctx.get(), GRPC_PEER_EMAIL_PROPERTY_NAME,
+                                     prop->value.data, prop->value.length);
+    } else if (strcmp(prop->name, TSI_X509_IP_PEER_PROPERTY) == 0) {
+      grpc_auth_context_add_property(ctx.get(), GRPC_PEER_IP_PROPERTY_NAME,
+                                     prop->value.data, prop->value.length);
     }
   }
   if (peer_identity_property_name != nullptr) {
     GPR_ASSERT(grpc_auth_context_set_peer_identity_property_name(
                    ctx.get(), peer_identity_property_name) == 1);
   }
-  // SPIFFE ID should be unique. If we find more than one SPIFFE IDs, we log
-  // the error without returning the error.
-  if (spiffe_id_count > 1) {
-    gpr_log(GPR_INFO, "Invalid SPIFFE ID: SPIFFE ID should be unique.");
-  }
-  if (spiffe_id_count == 1) {
-    GPR_ASSERT(spiffe_length > 0);
-    GPR_ASSERT(spiffe_data != nullptr);
-    grpc_auth_context_add_property(ctx.get(), GRPC_PEER_SPIFFE_ID_PROPERTY_NAME,
-                                   spiffe_data, spiffe_length);
+  // A valid SPIFFE certificate can only have exact one URI SAN field.
+  if (has_spiffe_id) {
+    if (uri_count == 1) {
+      GPR_ASSERT(spiffe_length > 0);
+      GPR_ASSERT(spiffe_data != nullptr);
+      grpc_auth_context_add_property(ctx.get(),
+                                     GRPC_PEER_SPIFFE_ID_PROPERTY_NAME,
+                                     spiffe_data, spiffe_length);
+    } else {
+      gpr_log(GPR_INFO, "Invalid SPIFFE ID: multiple URI SANs.");
+    }
   }
   return ctx;
 }
@@ -358,9 +386,21 @@ tsi_peer grpc_shallow_peer_from_ssl_auth_context(
                  0) {
         add_shallow_auth_property_to_peer(&peer, prop,
                                           TSI_X509_PEM_CERT_CHAIN_PROPERTY);
+      } else if (strcmp(prop->name, GRPC_PEER_DNS_PROPERTY_NAME) == 0) {
+        add_shallow_auth_property_to_peer(&peer, prop,
+                                          TSI_X509_DNS_PEER_PROPERTY);
+      } else if (strcmp(prop->name, GRPC_PEER_URI_PROPERTY_NAME) == 0) {
+        add_shallow_auth_property_to_peer(&peer, prop,
+                                          TSI_X509_URI_PEER_PROPERTY);
       } else if (strcmp(prop->name, GRPC_PEER_SPIFFE_ID_PROPERTY_NAME) == 0) {
         add_shallow_auth_property_to_peer(&peer, prop,
                                           TSI_X509_URI_PEER_PROPERTY);
+      } else if (strcmp(prop->name, GRPC_PEER_EMAIL_PROPERTY_NAME) == 0) {
+        add_shallow_auth_property_to_peer(&peer, prop,
+                                          TSI_X509_EMAIL_PEER_PROPERTY);
+      } else if (strcmp(prop->name, GRPC_PEER_IP_PROPERTY_NAME) == 0) {
+        add_shallow_auth_property_to_peer(&peer, prop,
+                                          TSI_X509_IP_PEER_PROPERTY);
       }
     }
   }
@@ -373,12 +413,15 @@ void grpc_shallow_peer_destruct(tsi_peer* peer) {
 
 grpc_security_status grpc_ssl_tsi_client_handshaker_factory_init(
     tsi_ssl_pem_key_cert_pair* pem_key_cert_pair, const char* pem_root_certs,
-    bool skip_server_certificate_verification,
-    tsi_ssl_session_cache* ssl_session_cache,
+    bool skip_server_certificate_verification, tsi_tls_version min_tls_version,
+    tsi_tls_version max_tls_version, tsi_ssl_session_cache* ssl_session_cache,
     tsi_ssl_client_handshaker_factory** handshaker_factory) {
   const char* root_certs;
   const tsi_ssl_root_certs_store* root_store;
   if (pem_root_certs == nullptr) {
+    gpr_log(GPR_INFO,
+            "No root certificates specified; use ones stored in system default "
+            "locations instead");
     // Use default root certificates.
     root_certs = grpc_core::DefaultSslRootStore::GetPemRootCerts();
     if (root_certs == nullptr) {
@@ -406,10 +449,12 @@ grpc_security_status grpc_ssl_tsi_client_handshaker_factory_init(
   options.session_cache = ssl_session_cache;
   options.skip_server_certificate_verification =
       skip_server_certificate_verification;
+  options.min_tls_version = min_tls_version;
+  options.max_tls_version = max_tls_version;
   const tsi_result result =
       tsi_create_ssl_client_handshaker_factory_with_options(&options,
                                                             handshaker_factory);
-  gpr_free((void*)options.alpn_protocols);
+  gpr_free(options.alpn_protocols);
   if (result != TSI_OK) {
     gpr_log(GPR_ERROR, "Handshaker factory creation failed with %s.",
             tsi_result_to_string(result));
@@ -422,6 +467,7 @@ grpc_security_status grpc_ssl_tsi_server_handshaker_factory_init(
     tsi_ssl_pem_key_cert_pair* pem_key_cert_pairs, size_t num_key_cert_pairs,
     const char* pem_root_certs,
     grpc_ssl_client_certificate_request_type client_certificate_request,
+    tsi_tls_version min_tls_version, tsi_tls_version max_tls_version,
     tsi_ssl_server_handshaker_factory** handshaker_factory) {
   size_t num_alpn_protocols = 0;
   const char** alpn_protocol_strings =
@@ -435,10 +481,12 @@ grpc_security_status grpc_ssl_tsi_server_handshaker_factory_init(
   options.cipher_suites = grpc_get_ssl_cipher_suites();
   options.alpn_protocols = alpn_protocol_strings;
   options.num_alpn_protocols = static_cast<uint16_t>(num_alpn_protocols);
+  options.min_tls_version = min_tls_version;
+  options.max_tls_version = max_tls_version;
   const tsi_result result =
       tsi_create_ssl_server_handshaker_factory_with_options(&options,
                                                             handshaker_factory);
-  gpr_free((void*)alpn_protocol_strings);
+  gpr_free(alpn_protocol_strings);
   if (result != TSI_OK) {
     gpr_log(GPR_ERROR, "Handshaker factory creation failed with %s.",
             tsi_result_to_string(result));

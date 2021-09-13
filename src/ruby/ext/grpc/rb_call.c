@@ -19,17 +19,17 @@
 #include <ruby/ruby.h>
 
 #include "rb_call.h"
+
+#include "rb_byte_buffer.h"
+#include "rb_call_credentials.h"
+#include "rb_completion_queue.h"
+#include "rb_grpc.h"
 #include "rb_grpc_imports.generated.h"
 
 #include <grpc/grpc.h>
 #include <grpc/impl/codegen/compression_types.h>
 #include <grpc/support/alloc.h>
 #include <grpc/support/log.h>
-
-#include "rb_byte_buffer.h"
-#include "rb_call_credentials.h"
-#include "rb_completion_queue.h"
-#include "rb_grpc.h"
 
 /* grpc_rb_cCall is the Call class whose instances proxy grpc_call. */
 static VALUE grpc_rb_cCall;
@@ -48,7 +48,7 @@ static VALUE grpc_rb_sBatchResult;
 
 /* grpc_rb_cMdAry is the MetadataArray class whose instances proxy
  * grpc_metadata_array. */
-static VALUE grpc_rb_cMdAry;
+VALUE grpc_rb_cMdAry;
 
 /* id_credentials is the name of the hidden ivar that preserves the value
  * of the credentials added to the call */
@@ -103,7 +103,7 @@ static void grpc_rb_call_destroy(void* p) {
   xfree(p);
 }
 
-static const rb_data_type_t grpc_rb_md_ary_data_type = {
+const rb_data_type_t grpc_rb_md_ary_data_type = {
     "grpc_metadata_array",
     {GRPC_RB_GC_NOT_MARKED,
      GRPC_RB_GC_DONT_FREE,
@@ -489,6 +489,7 @@ static int grpc_rb_md_ary_capacity_hash_cb(VALUE key, VALUE val,
 
 /* grpc_rb_md_ary_convert converts a ruby metadata hash into
    a grpc_metadata_array.
+   Note that this function may throw exceptions.
 */
 void grpc_rb_md_ary_convert(VALUE md_ary_hash, grpc_metadata_array* md_ary) {
   VALUE md_ary_obj = Qnil;

@@ -20,26 +20,29 @@
 #include "src/core/lib/iomgr/port.h"
 #if GRPC_ARES == 1 && defined(GRPC_WINDOWS_SOCKET_ARES_EV_DRIVER)
 
+#include <string.h>
+
 #include <ares.h>
+
+#include "absl/strings/str_format.h"
 
 #include <grpc/support/alloc.h>
 #include <grpc/support/log.h>
 #include <grpc/support/log_windows.h>
 #include <grpc/support/string_util.h>
 #include <grpc/support/time.h>
-#include <string.h>
+
+#include "src/core/ext/filters/client_channel/resolver/dns/c_ares/grpc_ares_ev_driver.h"
+#include "src/core/ext/filters/client_channel/resolver/dns/c_ares/grpc_ares_wrapper.h"
+#include "src/core/lib/address_utils/sockaddr_utils.h"
 #include "src/core/lib/gpr/string.h"
 #include "src/core/lib/gprpp/memory.h"
 #include "src/core/lib/iomgr/iocp_windows.h"
-#include "src/core/lib/iomgr/sockaddr_utils.h"
 #include "src/core/lib/iomgr/sockaddr_windows.h"
 #include "src/core/lib/iomgr/socket_windows.h"
 #include "src/core/lib/iomgr/tcp_windows.h"
 #include "src/core/lib/iomgr/work_serializer.h"
 #include "src/core/lib/slice/slice_internal.h"
-
-#include "src/core/ext/filters/client_channel/resolver/dns/c_ares/grpc_ares_ev_driver.h"
-#include "src/core/ext/filters/client_channel/resolver/dns/c_ares/grpc_ares_wrapper.h"
 
 /* TODO(apolcyn): remove this hack after fixing upstream.
  * Our grpc/c-ares code on Windows uses the ares_set_socket_functions API,
@@ -104,10 +107,10 @@ class GrpcPolledFdWindows {
         read_buf_(grpc_empty_slice()),
         write_buf_(grpc_empty_slice()),
         tcp_write_state_(WRITE_IDLE),
+        name_(absl::StrFormat("c-ares socket: %" PRIdPTR, as)),
         gotten_into_driver_list_(false),
         address_family_(address_family),
         socket_type_(socket_type) {
-    gpr_asprintf(&name_, "c-ares socket: %" PRIdPTR, as);
     // Closure Initialization
     GRPC_CLOSURE_INIT(&outer_read_closure_,
                       &GrpcPolledFdWindows::OnIocpReadable, this,
@@ -118,7 +121,7 @@ class GrpcPolledFdWindows {
     GRPC_CLOSURE_INIT(&on_tcp_connect_locked_,
                       &GrpcPolledFdWindows::OnTcpConnect, this,
                       grpc_schedule_on_exec_ctx);
-    winsocket_ = grpc_winsocket_create(as, name_);
+    winsocket_ = grpc_winsocket_create(as, name_.c_str());
   }
 
   ~GrpcPolledFdWindows() {
@@ -127,15 +130,14 @@ class GrpcPolledFdWindows {
     GPR_ASSERT(read_closure_ == nullptr);
     GPR_ASSERT(write_closure_ == nullptr);
     grpc_winsocket_destroy(winsocket_);
-    gpr_free(name_);
   }
 
-  void ScheduleAndNullReadClosure(grpc_error* error) {
+  void ScheduleAndNullReadClosure(grpc_error_handle error) {
     grpc_core::ExecCtx::Run(DEBUG_LOCATION, read_closure_, error);
     read_closure_ = nullptr;
   }
 
-  void ScheduleAndNullWriteClosure(grpc_error* error) {
+  void ScheduleAndNullWriteClosure(grpc_error_handle error) {
     grpc_core::ExecCtx::Run(DEBUG_LOCATION, write_closure_, error);
     write_closure_ = nullptr;
   }
@@ -250,9 +252,9 @@ class GrpcPolledFdWindows {
     }
   }
 
-  bool IsFdStillReadableLocked() { return GRPC_SLICE_LENGTH(read_buf_) > 0; }
+  bool IsFdStillReadableLocked() { return read_buf_has_data_; }
 
-  void ShutdownLocked(grpc_error* error) {
+  void ShutdownLocked(grpc_error_handle error) {
     grpc_winsocket_shutdown(winsocket_);
   }
 
@@ -260,7 +262,7 @@ class GrpcPolledFdWindows {
     return grpc_winsocket_wrapped_socket(winsocket_);
   }
 
-  const char* GetName() { return name_; }
+  const char* GetName() { return name_.c_str(); }
 
   ares_ssize_t RecvFrom(WSAErrorContext* wsa_error_ctx, void* data,
                         ares_socket_t data_len, int flags,
@@ -361,6 +363,8 @@ class GrpcPolledFdWindows {
     DWORD bytes_sent = 0;
     int wsa_error_code = 0;
     if (SendWriteBuf(&bytes_sent, nullptr, &wsa_error_code) != 0) {
+      grpc_slice_unref_internal(write_buf_);
+      write_buf_ = grpc_empty_slice();
       wsa_error_ctx->SetWSAError(wsa_error_code);
       char* msg = gpr_format_message(wsa_error_code);
       GRPC_CARES_TRACE_LOG(
@@ -417,7 +421,7 @@ class GrpcPolledFdWindows {
     abort();
   }
 
-  static void OnTcpConnect(void* arg, grpc_error* error) {
+  static void OnTcpConnect(void* arg, grpc_error_handle error) {
     GrpcPolledFdWindows* grpc_polled_fd =
         static_cast<GrpcPolledFdWindows*>(arg);
     GRPC_ERROR_REF(error);  // ref owned by lambda
@@ -428,12 +432,12 @@ class GrpcPolledFdWindows {
         DEBUG_LOCATION);
   }
 
-  void OnTcpConnectLocked(grpc_error* error) {
+  void OnTcpConnectLocked(grpc_error_handle error) {
     GRPC_CARES_TRACE_LOG(
         "fd:%s InnerOnTcpConnectLocked error:|%s| "
         "pending_register_for_readable:%d"
         " pending_register_for_writeable:%d",
-        GetName(), grpc_error_string(error),
+        GetName(), grpc_error_std_string(error).c_str(),
         pending_continue_register_for_on_readable_locked_,
         pending_continue_register_for_on_writeable_locked_);
     GPR_ASSERT(!connect_done_);
@@ -573,7 +577,7 @@ class GrpcPolledFdWindows {
     return out;
   }
 
-  static void OnIocpReadable(void* arg, grpc_error* error) {
+  static void OnIocpReadable(void* arg, grpc_error_handle error) {
     GrpcPolledFdWindows* polled_fd = static_cast<GrpcPolledFdWindows*>(arg);
     GRPC_ERROR_REF(error);  // ref owned by lambda
     polled_fd->work_serializer_->Run(
@@ -586,7 +590,7 @@ class GrpcPolledFdWindows {
   // c-ares reads from this socket later, but it shouldn't necessarily cancel
   // the entire resolution attempt. Doing so will allow the "inject broken
   // nameserver list" test to pass on Windows.
-  void OnIocpReadableLocked(grpc_error* error) {
+  void OnIocpReadableLocked(grpc_error_handle error) {
     if (error == GRPC_ERROR_NONE) {
       if (winsocket_->read_info.wsa_error != 0) {
         /* WSAEMSGSIZE would be due to receiving more data
@@ -600,7 +604,7 @@ class GrpcPolledFdWindows {
               "fd:|%s| OnIocpReadableInner winsocket_->read_info.wsa_error "
               "code:|%d| msg:|%s|",
               GetName(), winsocket_->read_info.wsa_error,
-              grpc_error_string(error));
+              grpc_error_std_string(error).c_str());
         }
       }
     }
@@ -618,7 +622,7 @@ class GrpcPolledFdWindows {
     ScheduleAndNullReadClosure(error);
   }
 
-  static void OnIocpWriteable(void* arg, grpc_error* error) {
+  static void OnIocpWriteable(void* arg, grpc_error_handle error) {
     GrpcPolledFdWindows* polled_fd = static_cast<GrpcPolledFdWindows*>(arg);
     GRPC_ERROR_REF(error);  // error owned by lambda
     polled_fd->work_serializer_->Run(
@@ -626,7 +630,7 @@ class GrpcPolledFdWindows {
         DEBUG_LOCATION);
   }
 
-  void OnIocpWriteableLocked(grpc_error* error) {
+  void OnIocpWriteableLocked(grpc_error_handle error) {
     GRPC_CARES_TRACE_LOG("OnIocpWriteableInner. fd:|%s|", GetName());
     GPR_ASSERT(socket_type_ == SOCK_STREAM);
     if (error == GRPC_ERROR_NONE) {
@@ -637,7 +641,7 @@ class GrpcPolledFdWindows {
             "fd:|%s| OnIocpWriteableInner. winsocket_->write_info.wsa_error "
             "code:|%d| msg:|%s|",
             GetName(), winsocket_->write_info.wsa_error,
-            grpc_error_string(error));
+            grpc_error_std_string(error).c_str());
       }
     }
     GPR_ASSERT(tcp_write_state_ == WRITE_PENDING);
@@ -657,6 +661,7 @@ class GrpcPolledFdWindows {
   bool gotten_into_driver_list() const { return gotten_into_driver_list_; }
   void set_gotten_into_driver_list() { gotten_into_driver_list_ = true; }
 
+ private:
   std::shared_ptr<WorkSerializer> work_serializer_;
   char recv_from_source_addr_[200];
   ares_socklen_t recv_from_source_addr_len_;
@@ -670,7 +675,7 @@ class GrpcPolledFdWindows {
   grpc_winsocket* winsocket_;
   // tcp_write_state_ is only used on TCP GrpcPolledFds
   WriteState tcp_write_state_;
-  char* name_ = nullptr;
+  std::string name_;
   bool gotten_into_driver_list_;
   int address_family_;
   int socket_type_;
@@ -847,7 +852,7 @@ class GrpcPolledFdWindowsWrapper : public GrpcPolledFd {
     return wrapped_->IsFdStillReadableLocked();
   }
 
-  void ShutdownLocked(grpc_error* error) override {
+  void ShutdownLocked(grpc_error_handle error) override {
     wrapped_->ShutdownLocked(error);
   }
 

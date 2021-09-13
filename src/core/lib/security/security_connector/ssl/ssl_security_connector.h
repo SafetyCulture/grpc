@@ -23,9 +23,8 @@
 
 #include <grpc/grpc_security.h>
 
-#include "src/core/lib/security/security_connector/security_connector.h"
-
 #include "src/core/lib/gprpp/ref_counted_ptr.h"
+#include "src/core/lib/security/security_connector/security_connector.h"
 #include "src/core/tsi/ssl_transport_security.h"
 #include "src/core/tsi/transport_security_interface.h"
 
@@ -33,7 +32,10 @@ struct grpc_ssl_config {
   tsi_ssl_pem_key_cert_pair* pem_key_cert_pair;
   char* pem_root_certs;
   verify_peer_options verify_options;
+  grpc_tls_version min_tls_version = grpc_tls_version::TLS1_2;
+  grpc_tls_version max_tls_version = grpc_tls_version::TLS1_3;
 };
+
 /* Creates an SSL channel_security_connector.
    - request_metadata_creds is the credentials object which metadata
      will be sent with each request. This parameter can be NULL.
@@ -62,6 +64,8 @@ struct grpc_ssl_server_config {
   char* pem_root_certs = nullptr;
   grpc_ssl_client_certificate_request_type client_certificate_request =
       GRPC_SSL_DONT_REQUEST_CLIENT_CERTIFICATE;
+  grpc_tls_version min_tls_version = grpc_tls_version::TLS1_2;
+  grpc_tls_version max_tls_version = grpc_tls_version::TLS1_3;
 };
 /* Creates an SSL server_security_connector.
    - config is the SSL config to be used for the SSL channel establishment.

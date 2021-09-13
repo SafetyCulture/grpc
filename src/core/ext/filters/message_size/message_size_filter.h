@@ -40,6 +40,9 @@ class MessageSizeParsedConfig : public ServiceConfigParser::ParsedConfig {
 
   const message_size_limits& limits() const { return limits_; }
 
+  static const MessageSizeParsedConfig* GetFromCallContext(
+      const grpc_call_context_element* context);
+
  private:
   message_size_limits limits_;
 };
@@ -47,12 +50,16 @@ class MessageSizeParsedConfig : public ServiceConfigParser::ParsedConfig {
 class MessageSizeParser : public ServiceConfigParser::Parser {
  public:
   std::unique_ptr<ServiceConfigParser::ParsedConfig> ParsePerMethodParams(
-      const Json& json, grpc_error** error) override;
+      const grpc_channel_args* /*args*/, const Json& json,
+      grpc_error_handle* error) override;
 
   static void Register();
 
   static size_t ParserIndex();
 };
+
+int GetMaxRecvSizeFromChannelArgs(const grpc_channel_args* args);
+int GetMaxSendSizeFromChannelArgs(const grpc_channel_args* args);
 
 }  // namespace grpc_core
 

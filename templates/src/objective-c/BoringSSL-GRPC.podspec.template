@@ -69,7 +69,7 @@
 
   Pod::Spec.new do |s|
     s.name     = 'BoringSSL-GRPC'
-    version = '0.0.9'
+    version = '0.0.20'
     s.version  = version
     s.summary  = 'BoringSSL is a fork of OpenSSL that is designed to meet Google\'s needs.'
     # Adapted from the homepage:
@@ -109,8 +109,8 @@
       :commit => "${boringssl_commit}",
     }
 
-    s.ios.deployment_target = '7.0'
-    s.osx.deployment_target = '10.7'
+    s.ios.deployment_target = '9.0'
+    s.osx.deployment_target = '10.10'
     s.tvos.deployment_target = '10.0'
     s.watchos.deployment_target = '4.0'
 
@@ -183,14 +183,15 @@
 
     s.prepare_command = <<-END_OF_COMMAND
       # Add a module map and an umbrella header
+      mkdir -p src/include/openssl
       cat > src/include/openssl/umbrella.h <<EOF
         #include "ssl.h"
         #include "crypto.h"
         #include "aes.h"
-        /* The following macros are defined by base.h. The latter is the first file included by the    
-           other headers. */    
-        #if defined(OPENSSL_ARM) || defined(OPENSSL_AARCH64)    
-        #  include "arm_arch.h"   
+        /* The following macros are defined by base.h. The latter is the first file included by the
+           other headers. */
+        #if defined(OPENSSL_ARM) || defined(OPENSSL_AARCH64)
+        #  include "arm_arch.h"
         #endif
         #include "asn1.h"
         #include "asn1_mac.h"
@@ -242,9 +243,13 @@
       # limit on the 'prepare_command' field length. The encoded header is generated from
       # /src/boringssl/boringssl_prefix_symbols.h. Here we decode the content and inject the header to
       # the correct location in BoringSSL.
-      base64 -D <<EOF | gunzip > src/include/openssl/boringssl_prefix_symbols.h
+      case "$(uname)" in
+        Darwin) opts="" ;;
+             *) opts="--ignore-garbage" ;;
+      esac
+      base64 --decode $opts <<EOF | gunzip > src/include/openssl/boringssl_prefix_symbols.h
         % for line in compress_boringssl_prefix_header():
-        ${line}
+        ${line.decode('utf-8')}
         % endfor
       EOF
 

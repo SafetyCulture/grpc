@@ -16,16 +16,19 @@
  *
  */
 
-#include <grpc/grpc.h>
-#include <grpc/support/alloc.h>
-#include <grpc/support/log.h>
-#include <grpc/support/string_util.h>
-
 #include <functional>
 #include <memory>
+#include <string>
 #include <thread>
 
 #include <gtest/gtest.h>
+
+#include "absl/memory/memory.h"
+#include "absl/strings/str_cat.h"
+
+#include <grpc/grpc.h>
+#include <grpc/support/alloc.h>
+#include <grpc/support/log.h>
 
 #include "src/core/lib/iomgr/endpoint.h"
 #include "src/core/lib/iomgr/error.h"
@@ -34,8 +37,8 @@
 #include "src/core/lib/iomgr/resolve_address.h"
 #include "src/core/lib/iomgr/tcp_client.h"
 #include "src/core/lib/slice/slice_internal.h"
-
 #include "test/core/util/port.h"
+#include "test/core/util/resource_user_util.h"
 #include "test/core/util/test_config.h"
 
 namespace grpc_core {
@@ -59,7 +62,8 @@ class ServerThread {
     cq_ = grpc_completion_queue_create_for_next(nullptr);
     grpc_server_register_completion_queue(server_, cq_, nullptr);
     grpc_server_start(server_);
-    thread_.reset(new std::thread(std::bind(&ServerThread::Serve, this)));
+    thread_ =
+        absl::make_unique<std::thread>(std::bind(&ServerThread::Serve, this));
   }
 
   void Shutdown() {
@@ -100,18 +104,19 @@ class Client {
   void Connect() {
     grpc_core::ExecCtx exec_ctx;
     grpc_resolved_addresses* server_addresses = nullptr;
-    grpc_error* error =
+    grpc_error_handle error =
         grpc_blocking_resolve_address(server_address_, "80", &server_addresses);
-    ASSERT_EQ(GRPC_ERROR_NONE, error) << grpc_error_string(error);
+    ASSERT_EQ(GRPC_ERROR_NONE, error) << grpc_error_std_string(error);
     ASSERT_GE(server_addresses->naddrs, 1UL);
     pollset_ = static_cast<grpc_pollset*>(gpr_zalloc(grpc_pollset_size()));
     grpc_pollset_init(pollset_, &mu_);
     grpc_pollset_set* pollset_set = grpc_pollset_set_create();
     grpc_pollset_set_add_pollset(pollset_set, pollset_);
     EventState state;
-    grpc_tcp_client_connect(state.closure(), &endpoint_, pollset_set,
-                            nullptr /* channel_args */, server_addresses->addrs,
-                            1000);
+    grpc_tcp_client_connect(
+        state.closure(), &endpoint_, grpc_slice_allocator_create_unlimited(),
+        pollset_set, nullptr /* channel_args */, server_addresses->addrs,
+        grpc_core::ExecCtx::Get()->Now() + 1000);
     ASSERT_TRUE(PollUntilDone(
         &state,
         grpc_timespec_to_millis_round_up(gpr_inf_future(GPR_CLOCK_MONOTONIC))));
@@ -173,11 +178,12 @@ class Client {
     bool done() const { return gpr_atm_acq_load(&done_atm_) != 0; }
 
     // Caller does NOT take ownership of the error.
-    grpc_error* error() const { return error_; }
+    grpc_error_handle error() const { return error_; }
 
    private:
-    static void OnEventDone(void* arg, grpc_error* error) {
-      gpr_log(GPR_INFO, "OnEventDone(): %s", grpc_error_string(error));
+    static void OnEventDone(void* arg, grpc_error_handle error) {
+      gpr_log(GPR_INFO, "OnEventDone(): %s",
+              grpc_error_std_string(error).c_str());
       EventState* state = static_cast<EventState*>(arg);
       state->error_ = GRPC_ERROR_REF(error);
       gpr_atm_rel_store(&state->done_atm_, 1);
@@ -185,7 +191,7 @@ class Client {
 
     grpc_closure closure_;
     gpr_atm done_atm_ = 0;
-    grpc_error* error_ = GRPC_ERROR_NONE;
+    grpc_error_handle error_ = GRPC_ERROR_NONE;
   };
 
   // Returns true if done, or false if deadline exceeded.
@@ -205,7 +211,7 @@ class Client {
     }
   }
 
-  static void PollsetDestroy(void* arg, grpc_error* /*error*/) {
+  static void PollsetDestroy(void* arg, grpc_error_handle /*error*/) {
     grpc_pollset* pollset = static_cast<grpc_pollset*>(arg);
     grpc_pollset_destroy(pollset);
     gpr_free(pollset);
@@ -220,15 +226,14 @@ class Client {
 TEST(SettingsTimeout, Basic) {
   // Construct server address string.
   const int server_port = grpc_pick_unused_port_or_die();
-  char* server_address_string;
-  gpr_asprintf(&server_address_string, "localhost:%d", server_port);
+  std::string server_address_string = absl::StrCat("localhost:", server_port);
   // Start server.
-  gpr_log(GPR_INFO, "starting server on %s", server_address_string);
-  ServerThread server_thread(server_address_string);
+  gpr_log(GPR_INFO, "starting server on %s", server_address_string.c_str());
+  ServerThread server_thread(server_address_string.c_str());
   server_thread.Start();
   // Create client and connect to server.
   gpr_log(GPR_INFO, "starting client connect");
-  Client client(server_address_string);
+  Client client(server_address_string.c_str());
   client.Connect();
   // Client read.  Should fail due to server dropping connection.
   gpr_log(GPR_INFO, "starting client read");
@@ -240,7 +245,6 @@ TEST(SettingsTimeout, Basic) {
   gpr_log(GPR_INFO, "shutting down server");
   server_thread.Shutdown();
   // Clean up.
-  gpr_free(server_address_string);
 }
 
 }  // namespace

@@ -139,18 +139,13 @@ class GrpcTlsCertificateProviderTest : public ::testing::Test {
       std::string root_error_str;
       std::string identity_error_str;
       if (root_cert_error != GRPC_ERROR_NONE) {
-        grpc_slice root_error_slice;
         GPR_ASSERT(grpc_error_get_str(
-            root_cert_error, GRPC_ERROR_STR_DESCRIPTION, &root_error_slice));
-        root_error_str = std::string(StringViewFromSlice(root_error_slice));
+            root_cert_error, GRPC_ERROR_STR_DESCRIPTION, &root_error_str));
       }
       if (identity_cert_error != GRPC_ERROR_NONE) {
-        grpc_slice identity_error_slice;
         GPR_ASSERT(grpc_error_get_str(identity_cert_error,
                                       GRPC_ERROR_STR_DESCRIPTION,
-                                      &identity_error_slice));
-        identity_error_str =
-            std::string(StringViewFromSlice(identity_error_slice));
+                                      &identity_error_str));
       }
       state_->error_queue.emplace_back(std::move(root_error_str),
                                        std::move(identity_error_str));
@@ -547,7 +542,7 @@ TEST_F(GrpcTlsCertificateProviderTest, FailedKeyCertMatchOnInvalidPair) {
 }  // namespace grpc_core
 
 int main(int argc, char** argv) {
-  grpc::testing::TestEnvironment env(argc, argv);
+  grpc::testing::TestEnvironment env(&argc, argv);
   ::testing::InitGoogleTest(&argc, argv);
   grpc_init();
   int ret = RUN_ALL_TESTS();

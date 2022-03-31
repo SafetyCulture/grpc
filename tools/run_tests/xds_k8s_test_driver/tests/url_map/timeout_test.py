@@ -12,7 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import logging
-import time
 from typing import Tuple
 import unittest
 
@@ -20,8 +19,8 @@ from absl import flags
 from absl.testing import absltest
 import grpc
 
-from framework import xds_k8s_flags
 from framework import xds_url_map_testcase
+from framework.helpers import skips
 from framework.test_app import client_app
 
 # Type aliases
@@ -81,10 +80,10 @@ class _BaseXdsTimeOutTestCase(XdsUrlMapTestCase):
 class TestTimeoutInRouteRule(_BaseXdsTimeOutTestCase):
 
     @staticmethod
-    def supported_servers() -> Tuple[str]:
+    def is_supported(config: skips.TestConfig) -> bool:
         # TODO(lidiz) either add support for rpc-behavior to other languages, or we
         # should always use Java server as backend.
-        return 'java',
+        return config.server_lang == 'java'
 
     def rpc_distribution_validate(self, test_client: XdsTestClient):
         rpc_distribution = self.configure_and_send(
@@ -112,8 +111,8 @@ class TestTimeoutInRouteRule(_BaseXdsTimeOutTestCase):
 class TestTimeoutInApplication(_BaseXdsTimeOutTestCase):
 
     @staticmethod
-    def supported_servers() -> Tuple[str]:
-        return 'java',
+    def is_supported(config: skips.TestConfig) -> bool:
+        return config.server_lang == 'java'
 
     def rpc_distribution_validate(self, test_client: XdsTestClient):
         rpc_distribution = self.configure_and_send(

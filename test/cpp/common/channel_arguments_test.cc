@@ -53,7 +53,7 @@ bool test_mutator_mutate_fd(int fd, grpc_socket_mutator* mutator) {
 }
 
 int test_mutator_compare(grpc_socket_mutator* a, grpc_socket_mutator* b) {
-  return GPR_ICMP(a, b);
+  return grpc_core::QsortCompare(a, b);
 }
 
 void test_mutator_destroy(grpc_socket_mutator* mutator) {
@@ -257,7 +257,7 @@ TEST_F(ChannelArgumentsTest, SetUserAgentPrefix) {
 }  // namespace grpc
 
 int main(int argc, char** argv) {
-  grpc::testing::TestEnvironment env(argc, argv);
+  grpc::testing::TestEnvironment env(&argc, argv);
   ::testing::InitGoogleTest(&argc, argv);
   int ret = RUN_ALL_TESTS();
   return ret;

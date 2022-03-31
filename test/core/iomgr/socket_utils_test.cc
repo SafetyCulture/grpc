@@ -91,7 +91,7 @@ static int compare_test_mutator(grpc_socket_mutator* a,
       reinterpret_cast<struct test_socket_mutator*>(a);
   struct test_socket_mutator* mb =
       reinterpret_cast<struct test_socket_mutator*>(b);
-  return GPR_ICMP(ma->option_value, mb->option_value);
+  return grpc_core::QsortCompare(ma->option_value, mb->option_value);
 }
 
 static const grpc_socket_mutator_vtable mutator_vtable = {
@@ -135,7 +135,7 @@ static void test_with_vtable(const grpc_socket_mutator_vtable* vtable) {
 
 int main(int argc, char** argv) {
   int sock;
-  grpc::testing::TestEnvironment env(argc, argv);
+  grpc::testing::TestEnvironment env(&argc, argv);
 
   sock = socket(PF_INET, SOCK_STREAM, 0);
   GPR_ASSERT(sock > 0);

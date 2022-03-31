@@ -377,6 +377,9 @@ class TestMultipleServiceImpl : public RpcService {
     int server_try_cancel = internal::GetIntValueFromMetadata(
         kServerTryCancelRequest, context->client_metadata(), DO_NOT_CANCEL);
 
+    int client_try_cancel = static_cast<bool>(internal::GetIntValueFromMetadata(
+        kClientTryCancelRequest, context->client_metadata(), 0));
+
     EchoRequest request;
     EchoResponse response;
 
@@ -407,6 +410,10 @@ class TestMultipleServiceImpl : public RpcService {
       } else {
         stream->Write(response);
       }
+    }
+
+    if (client_try_cancel) {
+      EXPECT_TRUE(context->IsCancelled());
     }
 
     if (server_try_cancel_thd != nullptr) {
@@ -444,7 +451,7 @@ class TestMultipleServiceImpl : public RpcService {
 };
 
 class CallbackTestServiceImpl
-    : public ::grpc::testing::EchoTestService::CallbackService {
+    : public grpc::testing::EchoTestService::CallbackService {
  public:
   CallbackTestServiceImpl() : signal_client_(false), host_() {}
   explicit CallbackTestServiceImpl(const std::string& host)
@@ -483,7 +490,7 @@ class CallbackTestServiceImpl
 };
 
 using TestServiceImpl =
-    TestMultipleServiceImpl<::grpc::testing::EchoTestService::Service>;
+    TestMultipleServiceImpl<grpc::testing::EchoTestService::Service>;
 
 }  // namespace testing
 }  // namespace grpc

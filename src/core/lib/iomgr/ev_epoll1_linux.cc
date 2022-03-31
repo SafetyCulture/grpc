@@ -195,7 +195,7 @@ struct grpc_pollset_worker {
     (worker)->kick_state_mutator = __LINE__; \
   } while (false)
 
-#define MAX_NEIGHBORHOODS 1024
+#define MAX_NEIGHBORHOODS 1024u
 
 typedef struct pollset_neighborhood {
   union {
@@ -525,7 +525,8 @@ static grpc_error_handle pollset_global_init(void) {
                 &ev) != 0) {
     return GRPC_OS_ERROR(errno, "epoll_ctl");
   }
-  g_num_neighborhoods = GPR_CLAMP(gpr_cpu_num_cores(), 1, MAX_NEIGHBORHOODS);
+  g_num_neighborhoods =
+      grpc_core::Clamp(gpr_cpu_num_cores(), 1u, MAX_NEIGHBORHOODS);
   g_neighborhoods = static_cast<pollset_neighborhood*>(
       gpr_zalloc(sizeof(*g_neighborhoods) * g_num_neighborhoods));
   for (size_t i = 0; i < g_num_neighborhoods; i++) {
@@ -638,9 +639,9 @@ static void pollset_shutdown(grpc_pollset* pollset, grpc_closure* closure) {
   pollset_maybe_finish_shutdown(pollset);
 }
 
-static int poll_deadline_to_millis_timeout(grpc_millis millis) {
-  if (millis == GRPC_MILLIS_INF_FUTURE) return -1;
-  grpc_millis delta = millis - grpc_core::ExecCtx::Get()->Now();
+static int poll_deadline_to_millis_timeout(grpc_core::Timestamp millis) {
+  if (millis == grpc_core::Timestamp::InfFuture()) return -1;
+  int64_t delta = (millis - grpc_core::ExecCtx::Get()->Now()).millis();
   if (delta > INT_MAX) {
     return INT_MAX;
   } else if (delta < 0) {
@@ -710,7 +711,8 @@ static grpc_error_handle process_epoll_events(grpc_pollset* /*pollset*/) {
    NOTE ON SYNCHRONIZATION: At any point of time, only the g_active_poller
    (i.e the designated poller thread) will be calling this function. So there is
    no need for any synchronization when accesing fields in g_epoll_set */
-static grpc_error_handle do_epoll_wait(grpc_pollset* ps, grpc_millis deadline) {
+static grpc_error_handle do_epoll_wait(grpc_pollset* ps,
+                                       grpc_core::Timestamp deadline) {
   GPR_TIMER_SCOPE("do_epoll_wait", 0);
 
   int r;
@@ -743,7 +745,7 @@ static grpc_error_handle do_epoll_wait(grpc_pollset* ps, grpc_millis deadline) {
 
 static bool begin_worker(grpc_pollset* pollset, grpc_pollset_worker* worker,
                          grpc_pollset_worker** worker_hdl,
-                         grpc_millis deadline) {
+                         grpc_core::Timestamp deadline) {
   GPR_TIMER_SCOPE("begin_worker", 0);
   if (worker_hdl != nullptr) *worker_hdl = worker;
   worker->initialized_cv = false;
@@ -830,7 +832,7 @@ static bool begin_worker(grpc_pollset* pollset, grpc_pollset_worker* worker,
       }
 
       if (gpr_cv_wait(&worker->cv, &pollset->mu,
-                      grpc_millis_to_timespec(deadline, GPR_CLOCK_MONOTONIC)) &&
+                      deadline.as_timespec(GPR_CLOCK_MONOTONIC)) &&
           worker->state == UNKICKED) {
         /* If gpr_cv_wait returns true (i.e a timeout), pretend that the worker
            received a kick */
@@ -1011,7 +1013,7 @@ static void end_worker(grpc_pollset* pollset, grpc_pollset_worker* worker,
    ensure that it is held by the time the function returns */
 static grpc_error_handle pollset_work(grpc_pollset* ps,
                                       grpc_pollset_worker** worker_hdl,
-                                      grpc_millis deadline) {
+                                      grpc_core::Timestamp deadline) {
   GPR_TIMER_SCOPE("pollset_work", 0);
   grpc_pollset_worker worker;
   grpc_error_handle error = GRPC_ERROR_NONE;

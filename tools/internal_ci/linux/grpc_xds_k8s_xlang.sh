@@ -17,15 +17,12 @@ set -eo pipefail
 
 # Constants
 readonly GITHUB_REPOSITORY_NAME="grpc"
-# GKE Cluster
-readonly GKE_CLUSTER_NAME="interop-test-psm-sec-v2-us-central1-a"
-readonly GKE_CLUSTER_ZONE="us-central1-a"
-
+readonly TEST_DRIVER_INSTALL_SCRIPT_URL="https://raw.githubusercontent.com/${TEST_DRIVER_REPO_OWNER:-grpc}/grpc/${TEST_DRIVER_BRANCH:-master}/tools/internal_ci/linux/grpc_xds_k8s_install_test_driver.sh"
 ## xDS test server/client Docker images
 readonly IMAGE_REPO="gcr.io/grpc-testing/xds-interop"
 readonly SERVER_LANG="cpp go java"
 readonly CLIENT_LANG="cpp go java"
-readonly VERSION_TAG="v1.40.x"
+readonly VERSION_TAG="v1.41.x"
 
 #######################################
 # Executes the test case
@@ -51,16 +48,22 @@ run_test() {
   local server_image_name="${IMAGE_REPO}/${slang}-server:${tag}"
   local client_image_name="${IMAGE_REPO}/${clang}-client:${tag}"
   # TODO(sanjaypujare): skip test if image not found (by using gcloud_gcr_list_image_tags)
+
+  # testing_version is used by the framework to determine the supported PSM
+  # features. It's captured from Kokoro job name of the Core repo, which takes
+  # 2 forms:
+  #   grpc/core/master/linux/...
+  #   grpc/core/v1.42.x/branch/linux/...
   set -x
   python -m "tests.security_test" \
     --flagfile="${TEST_DRIVER_FLAGFILE}" \
     --kube_context="${KUBE_CONTEXT}" \
     --server_image="${server_image_name}" \
     --client_image="${client_image_name}" \
+    --testing_version=$(echo "$KOKORO_JOB_NAME" | sed -E 's|^grpc/core/([^/]+)/.*|\1|') \
     --xml_output_file="${TEST_XML_OUTPUT_DIR}/${tag}/${clang}-${slang}/sponge_log.xml" \
     --force_cleanup \
     --nocheck_local_certs
-  set +x
 }
 
 #######################################
@@ -86,8 +89,13 @@ run_test() {
 main() {
   local script_dir
   script_dir="$(dirname "$0")"
-  # shellcheck source=tools/internal_ci/linux/grpc_xds_k8s_install_test_driver.sh
-  source "${script_dir}/grpc_xds_k8s_install_test_driver.sh"
+
+  # Source the test driver from the master branch.
+  echo "Sourcing test driver install script from: ${TEST_DRIVER_INSTALL_SCRIPT_URL}"
+  source /dev/stdin <<< "$(curl -s "${TEST_DRIVER_INSTALL_SCRIPT_URL}")"
+
+  activate_gke_cluster GKE_CLUSTER_PSM_SECURITY
+
   set -x
   if [[ -n "${KOKORO_ARTIFACTS_DIR}" ]]; then
     kokoro_setup_test_driver "${GITHUB_REPOSITORY_NAME}"
@@ -98,6 +106,8 @@ main() {
   fi
 
   local failed_tests=0
+  local successful_string
+  local failed_string
   # Run tests
   for TAG in ${VERSION_TAG}
   do
@@ -106,12 +116,20 @@ main() {
     for SLANG in ${SERVER_LANG}
     do
       if [ "${CLANG}" != "${SLANG}" ]; then
-        run_test "${TAG}" "${SLANG}" "${CLANG}" || (( failed_tests++ ))
+        if run_test "${TAG}" "${SLANG}" "${CLANG}"; then
+          successful_string="${successful_string} ${TAG}/${CLANG}-${SLANG}"
+        else
+          failed_tests=$((failed_tests+1))
+          failed_string="${failed_string} ${TAG}/${CLANG}-${SLANG}"
+        fi
       fi
     done
     echo "Failed test suites: ${failed_tests}"
     done
   done
+  set +x
+  echo "Failed test suites list: ${failed_string}"
+  echo "Successful test suites list: ${successful_string}"
   if (( failed_tests > 0 )); then
     exit 1
   fi

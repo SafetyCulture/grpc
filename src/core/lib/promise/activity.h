@@ -15,13 +15,29 @@
 #ifndef GRPC_CORE_LIB_PROMISE_ACTIVITY_H
 #define GRPC_CORE_LIB_PROMISE_ACTIVITY_H
 
-#include <grpc/impl/codegen/port_platform.h>
+#include <grpc/support/port_platform.h>
 
+#include <stddef.h>
+#include <stdint.h>
+
+#include <algorithm>
+#include <atomic>
 #include <functional>
+#include <memory>
+#include <type_traits>
+#include <utility>
+
+#include "absl/base/thread_annotations.h"
+#include "absl/status/status.h"
+#include "absl/types/optional.h"
+#include "absl/types/variant.h"
+#include "absl/utility/utility.h"
 
 #include <grpc/support/log.h>
 
+#include "src/core/lib/gpr/tls.h"
 #include "src/core/lib/gprpp/construct_destruct.h"
+#include "src/core/lib/gprpp/orphanable.h"
 #include "src/core/lib/gprpp/sync.h"
 #include "src/core/lib/promise/context.h"
 #include "src/core/lib/promise/detail/promise_factory.h"
@@ -78,7 +94,7 @@ class Waker {
  private:
   class Unwakeable final : public Wakeable {
    public:
-    void Wakeup() final { abort(); }
+    void Wakeup() final {}
     void Drop() final {}
   };
 
@@ -95,27 +111,17 @@ class Waker {
 // Activity execution may be cancelled by simply deleting the activity. In such
 // a case, if execution had not already finished, the done callback would be
 // called with absl::CancelledError().
-// Activity also takes a CallbackScheduler instance on which to schedule
-// callbacks to itself in a lock-clean environment.
-class Activity : private Wakeable {
+class Activity : public Orphanable {
  public:
-  // Cancel execution of the underlying promise.
-  virtual void Cancel() ABSL_LOCKS_EXCLUDED(mu_) = 0;
+  // Force wakeup from the outside.
+  // This should be rarely needed, and usages should be accompanied with a note
+  // on why it's not possible to wakeup with a Waker object.
+  // Nevertheless, it's sometimes useful for integrations with Activity to force
+  // an Activity to repoll.
+  void ForceWakeup() { MakeOwningWaker().Wakeup(); }
 
-  // Destroy the Activity - used for the type alias ActivityPtr.
-  struct Deleter {
-    void operator()(Activity* activity) {
-      activity->Cancel();
-      activity->Unref();
-    }
-  };
-
-  // Fetch the size of the implementation of this activity.
-  virtual size_t Size() = 0;
-
-  // Wakeup the current threads activity - will force a subsequent poll after
-  // the one that's running.
-  static void WakeupCurrent() { current()->got_wakeup_during_run_ = true; }
+  // Force the current activity to immediately repoll if it doesn't complete.
+  virtual void ForceImmediateRepoll() = 0;
 
   // Return the current activity.
   // Additionally:
@@ -124,49 +130,23 @@ class Activity : private Wakeable {
   //   locked
   // - back up that assertation with a runtime check in debug builds (it's
   //   prohibitively expensive in non-debug builds)
-  static Activity* current() ABSL_ASSERT_EXCLUSIVE_LOCK(current()->mu_) {
-#ifndef NDEBUG
-    GPR_ASSERT(g_current_activity_);
-    if (g_current_activity_ != nullptr) {
-      g_current_activity_->mu_.AssertHeld();
-    }
-#endif
-    return g_current_activity_;
-  }
+  static Activity* current() { return g_current_activity_; }
 
   // Produce an activity-owning Waker. The produced waker will keep the activity
   // alive until it's awoken or dropped.
-  Waker MakeOwningWaker() {
-    Ref();
-    return Waker(this);
-  }
+  virtual Waker MakeOwningWaker() = 0;
 
   // Produce a non-owning Waker. The waker will own a small heap allocated weak
   // pointer to this activity. This is more suitable for wakeups that may not be
   // delivered until long after the activity should be destroyed.
-  Waker MakeNonOwningWaker() ABSL_EXCLUSIVE_LOCKS_REQUIRED(mu_);
+  virtual Waker MakeNonOwningWaker() = 0;
 
  protected:
-  inline virtual ~Activity() {
-    if (handle_) {
-      DropHandle();
-    }
-  }
-
-  // All promise execution occurs under this mutex.
-  Mutex mu_;
-
   // Check if this activity is the current activity executing on the current
   // thread.
   bool is_current() const { return this == g_current_activity_; }
   // Check if there is an activity executing on the current thread.
   static bool have_current() { return g_current_activity_ != nullptr; }
-  // Check if we got an internal wakeup since the last time this function was
-  // called.
-  bool got_wakeup() ABSL_EXCLUSIVE_LOCKS_REQUIRED(mu_) {
-    return absl::exchange(got_wakeup_during_run_, false);
-  }
-
   // Set the current activity at construction, clean it up at destruction.
   class ScopedActivity {
    public:
@@ -179,12 +159,141 @@ class Activity : private Wakeable {
     ScopedActivity& operator=(const ScopedActivity&) = delete;
   };
 
+ private:
+  // Set during RunLoop to the Activity that's executing.
+  // Being set implies that mu_ is held.
+  static GPR_THREAD_LOCAL(Activity*) g_current_activity_;
+};
+
+// Owned pointer to one Activity.
+using ActivityPtr = OrphanablePtr<Activity>;
+
+namespace promise_detail {
+
+template <typename Context>
+class ContextHolder {
+ public:
+  using ContextType = Context;
+
+  explicit ContextHolder(Context value) : value_(std::move(value)) {}
+  Context* GetContext() { return &value_; }
+
+ private:
+  Context value_;
+};
+
+template <typename Context>
+class ContextHolder<Context*> {
+ public:
+  using ContextType = Context;
+
+  explicit ContextHolder(Context* value) : value_(value) {}
+  Context* GetContext() { return value_; }
+
+ private:
+  Context* value_;
+};
+
+template <typename Context, typename Deleter>
+class ContextHolder<std::unique_ptr<Context, Deleter>> {
+ public:
+  using ContextType = Context;
+
+  explicit ContextHolder(std::unique_ptr<Context, Deleter> value)
+      : value_(std::move(value)) {}
+  Context* GetContext() { return value_.get(); }
+
+ private:
+  std::unique_ptr<Context, Deleter> value_;
+};
+
+template <typename HeldContext>
+using ContextTypeFromHeld = typename ContextHolder<HeldContext>::ContextType;
+
+template <typename... Contexts>
+class ActivityContexts : public ContextHolder<Contexts>... {
+ public:
+  explicit ActivityContexts(Contexts&&... contexts)
+      : ContextHolder<Contexts>(std::forward<Contexts>(contexts))... {}
+
+  class ScopedContext : public Context<ContextTypeFromHeld<Contexts>>... {
+   public:
+    explicit ScopedContext(ActivityContexts* contexts)
+        : Context<ContextTypeFromHeld<Contexts>>(
+              static_cast<ContextHolder<Contexts>*>(contexts)
+                  ->GetContext())... {}
+  };
+};
+
+// A free standing activity: an activity that owns its own synchronization and
+// memory.
+// The alternative is an activity that's somehow tied into another system, for
+// instance the type seen in promise_based_filter.h as we're transitioning from
+// the old filter stack to the new system.
+// FreestandingActivity is-a Wakeable, but needs to increment a refcount before
+// returning that Wakeable interface. Additionally, we want to keep
+// FreestandingActivity as small as is possible, since it will be used
+// everywhere. So we use inheritance to provide the Wakeable interface: this
+// makes it zero sized, and we make the inheritance private to prevent
+// accidental casting.
+class FreestandingActivity : public Activity, private Wakeable {
+ public:
+  Waker MakeOwningWaker() final {
+    Ref();
+    return Waker(this);
+  }
+  Waker MakeNonOwningWaker() final;
+
+  void Orphan() final {
+    Cancel();
+    Unref();
+  }
+
+  void ForceImmediateRepoll() final {
+    mu_.AssertHeld();
+    SetActionDuringRun(ActionDuringRun::kWakeup);
+  }
+
+ protected:
+  // Action received during a run, in priority order.
+  // If more than one action is received during a run, we use max() to resolve
+  // which one to report (so Cancel overrides Wakeup).
+  enum class ActionDuringRun : uint8_t {
+    kNone,    // No action occured during run.
+    kWakeup,  // A wakeup occured during run.
+    kCancel,  // Cancel was called during run.
+  };
+
+  inline ~FreestandingActivity() override {
+    if (handle_) {
+      DropHandle();
+    }
+  }
+
+  // Check if we got an internal wakeup since the last time this function was
+  // called.
+  ActionDuringRun GotActionDuringRun() ABSL_EXCLUSIVE_LOCKS_REQUIRED(mu_) {
+    return absl::exchange(action_during_run_, ActionDuringRun::kNone);
+  }
+
   // Implementors of Wakeable::Wakeup should call this after the wakeup has
   // completed.
   void WakeupComplete() { Unref(); }
 
+  // Set the action that occured during this run.
+  // We use max to combine actions so that cancellation overrides wakeups.
+  void SetActionDuringRun(ActionDuringRun action)
+      ABSL_EXCLUSIVE_LOCKS_REQUIRED(mu_) {
+    action_during_run_ = std::max(action_during_run_, action);
+  }
+
+  Mutex* mu() ABSL_LOCK_RETURNED(mu_) { return &mu_; }
+
  private:
   class Handle;
+
+  // Cancel execution of the underlying promise.
+  virtual void Cancel() = 0;
 
   void Ref() { refs_.fetch_add(1, std::memory_order_relaxed); }
   void Unref() {
@@ -202,71 +311,56 @@ class Activity : private Wakeable {
   // Drop the (proved existing) wait handle.
   void DropHandle() ABSL_EXCLUSIVE_LOCKS_REQUIRED(mu_);
 
+  // All promise execution occurs under this mutex.
+  Mutex mu_;
+
   // Current refcount.
   std::atomic<uint32_t> refs_{1};
-  // If wakeup is called during Promise polling, we raise this flag and repoll
-  // until things settle out.
-  bool got_wakeup_during_run_ ABSL_GUARDED_BY(mu_) = false;
+  // If wakeup is called during Promise polling, we set this to Wakeup and
+  // repoll. If cancel is called during Promise polling, we set this to Cancel
+  // and cancel at the end of polling.
+  ActionDuringRun action_during_run_ ABSL_GUARDED_BY(mu_) =
+      ActionDuringRun::kNone;
   // Handle for long waits. Allows a very small weak pointer type object to
   // queue for wakeups while Activity may be deleted earlier.
   Handle* handle_ ABSL_GUARDED_BY(mu_) = nullptr;
-  // Set during RunLoop to the Activity that's executing.
-  // Being set implies that mu_ is held.
-  static GPR_THREAD_LOCAL(Activity*) g_current_activity_;
-};
-
-// Owned pointer to one Activity.
-using ActivityPtr = std::unique_ptr<Activity, Activity::Deleter>;
-
-namespace promise_detail {
-
-template <typename Context>
-class ContextHolder {
- public:
-  explicit ContextHolder(Context value) : value_(std::move(value)) {}
-  Context* GetContext() { return &value_; }
-
- private:
-  Context value_;
-};
-
-template <typename Context>
-class ContextHolder<Context*> {
- public:
-  explicit ContextHolder(Context* value) : value_(value) {}
-  Context* GetContext() { return value_; }
-
- private:
-  Context* value_;
-};
-
-template <typename... Contexts>
-class EnterContexts : public promise_detail::Context<Contexts>... {
- public:
-  explicit EnterContexts(Contexts*... contexts)
-      : promise_detail::Context<Contexts>(contexts)... {}
 };
 
 // Implementation details for an Activity of an arbitrary type of promise.
-template <class F, class CallbackScheduler, class OnDone, typename... Contexts>
-class PromiseActivity final
-    : public Activity,
-      private promise_detail::ContextHolder<Contexts>... {
+// There should exist a static function:
+// struct WakeupScheduler {
+//   template <typename ActivityType>
+//   void ScheduleWakeup(ActivityType* activity);
+// };
+// This function should arrange that activity->RunScheduledWakeup() be invoked
+// at the earliest opportunity.
+// It can assume that activity will remain live until RunScheduledWakeup() is
+// invoked, and that a given activity will not be concurrently scheduled again
+// until its RunScheduledWakeup() has been invoked.
+// We use private inheritance here as a way of getting private members for
+// each of the contexts.
+// TODO(ctiller): We can probably reconsider the private inheritance here
+// when we move away from C++11 and have more powerful template features.
+template <class F, class WakeupScheduler, class OnDone, typename... Contexts>
+class PromiseActivity final : public FreestandingActivity,
+                              private ActivityContexts<Contexts...> {
  public:
   using Factory = PromiseFactory<void, F>;
-  PromiseActivity(F promise_factory, CallbackScheduler callback_scheduler,
-                  OnDone on_done, Contexts... contexts)
-      : Activity(),
-        ContextHolder<Contexts>(std::move(contexts))...,
-        callback_scheduler_(std::move(callback_scheduler)),
+  using ResultType = typename Factory::Promise::Result;
+
+  PromiseActivity(F promise_factory, WakeupScheduler wakeup_scheduler,
+                  OnDone on_done, Contexts&&... contexts)
+      : FreestandingActivity(),
+        ActivityContexts<Contexts...>(std::forward<Contexts>(contexts)...),
+        wakeup_scheduler_(std::move(wakeup_scheduler)),
         on_done_(std::move(on_done)) {
     // Lock, construct an initial promise from the factory, and step it.
     // This may hit a waiter, which could expose our this pointer to other
     // threads, meaning we do need to hold this mutex even though we're still
     // constructing.
-    mu_.Lock();
+    mu()->Lock();
     auto status = Start(Factory(std::move(promise_factory)));
-    mu_.Unlock();
+    mu()->Unlock();
     // We may complete immediately.
     if (status.has_value()) {
       on_done_(std::move(*status));
@@ -280,12 +374,24 @@ class PromiseActivity final
     GPR_ASSERT(done_);
   }
 
-  size_t Size() override { return sizeof(*this); }
+  void RunScheduledWakeup() {
+    GPR_ASSERT(wakeup_scheduled_.exchange(false, std::memory_order_acq_rel));
+    Step();
+    WakeupComplete();
+  }
+
+ private:
+  using typename ActivityContexts<Contexts...>::ScopedContext;
 
   void Cancel() final {
+    if (Activity::is_current()) {
+      mu()->AssertHeld();
+      SetActionDuringRun(ActionDuringRun::kCancel);
+      return;
+    }
     bool was_done;
     {
-      MutexLock lock(&mu_);
+      MutexLock lock(mu());
       // Check if we were done, and flag done.
       was_done = done_;
       if (!done_) MarkDone();
@@ -296,31 +402,27 @@ class PromiseActivity final
     }
   }
 
- private:
   // Wakeup this activity. Arrange to poll the activity again at a convenient
   // time: this could be inline if it's deemed safe, or it could be by passing
   // the activity to an external threadpool to run. If the activity is already
   // running on this thread, a note is taken of such and the activity is
   // repolled if it doesn't complete.
   void Wakeup() final {
-    // If there's no active activity, we can just run inline.
-    if (!Activity::have_current()) {
-      Step();
-      WakeupComplete();
-      return;
-    }
     // If there is an active activity, but hey it's us, flag that and we'll loop
     // in RunLoop (that's calling from above here!).
     if (Activity::is_current()) {
-      WakeupCurrent();
+      mu()->AssertHeld();
+      SetActionDuringRun(ActionDuringRun::kWakeup);
       WakeupComplete();
       return;
     }
-    // Can't safely run, so ask to run later.
-    callback_scheduler_([this]() {
-      this->Step();
-      this->WakeupComplete();
-    });
+    if (!wakeup_scheduled_.exchange(true, std::memory_order_acq_rel)) {
+      // Can't safely run, so ask to run later.
+      wakeup_scheduler_.ScheduleWakeup(this);
+    } else {
+      // Already a wakeup scheduled for later, drop ref.
+      WakeupComplete();
+    }
   }
 
   // Drop a wakeup
@@ -328,7 +430,7 @@ class PromiseActivity final
 
   // Notification that we're no longer executing - it's ok to destruct the
   // promise.
-  void MarkDone() ABSL_EXCLUSIVE_LOCKS_REQUIRED(mu_) {
+  void MarkDone() ABSL_EXCLUSIVE_LOCKS_REQUIRED(mu()) {
     GPR_ASSERT(!done_);
     done_ = true;
     Destruct(&promise_holder_.promise);
@@ -336,47 +438,46 @@ class PromiseActivity final
 
   // In response to Wakeup, run the Promise state machine again until it
   // settles. Then check for completion, and if we have completed, call on_done.
-  void Step() ABSL_LOCKS_EXCLUDED(mu_) {
+  void Step() ABSL_LOCKS_EXCLUDED(mu()) {
     // Poll the promise until things settle out under a lock.
-    mu_.Lock();
+    mu()->Lock();
     if (done_) {
       // We might get some spurious wakeups after finishing.
-      mu_.Unlock();
+      mu()->Unlock();
       return;
     }
     auto status = RunStep();
-    mu_.Unlock();
+    mu()->Unlock();
     if (status.has_value()) {
       on_done_(std::move(*status));
     }
   }
 
   // The main body of a step: set the current activity, and any contexts, and
-  // then run the main polling loop. Contained in a function by itself in order
-  // to keep the scoping rules a little easier in Step().
-  absl::optional<absl::Status> RunStep() ABSL_EXCLUSIVE_LOCKS_REQUIRED(mu_) {
+  // then run the main polling loop. Contained in a function by itself in
+  // order to keep the scoping rules a little easier in Step().
+  absl::optional<ResultType> RunStep() ABSL_EXCLUSIVE_LOCKS_REQUIRED(mu()) {
     ScopedActivity scoped_activity(this);
-    EnterContexts<Contexts...> contexts(
-        static_cast<ContextHolder<Contexts>*>(this)->GetContext()...);
+    ScopedContext contexts(this);
     return StepLoop();
   }
 
-  // Similarly to RunStep, but additionally construct the promise from a promise
-  // factory before entering the main loop. Called once from the constructor.
-  absl::optional<absl::Status> Start(Factory promise_factory)
-      ABSL_EXCLUSIVE_LOCKS_REQUIRED(mu_) {
+  // Similarly to RunStep, but additionally construct the promise from a
+  // promise factory before entering the main loop. Called once from the
+  // constructor.
+  absl::optional<ResultType> Start(Factory promise_factory)
+      ABSL_EXCLUSIVE_LOCKS_REQUIRED(mu()) {
     ScopedActivity scoped_activity(this);
-    EnterContexts<Contexts...> contexts(
-        static_cast<ContextHolder<Contexts>*>(this)->GetContext()...);
+    ScopedContext contexts(this);
     Construct(&promise_holder_.promise, promise_factory.Once());
     return StepLoop();
   }
 
-  // Until there are no wakeups from within and the promise is incomplete: poll
-  // the promise.
-  absl::optional<absl::Status> StepLoop() ABSL_EXCLUSIVE_LOCKS_REQUIRED(mu_) {
+  // Until there are no wakeups from within and the promise is incomplete:
+  // poll the promise.
+  absl::optional<ResultType> StepLoop() ABSL_EXCLUSIVE_LOCKS_REQUIRED(mu()) {
     GPR_ASSERT(is_current());
-    do {
+    while (true) {
       // Run the promise.
       GPR_ASSERT(!done_);
       auto r = promise_holder_.promise();
@@ -386,11 +487,27 @@ class PromiseActivity final
         return IntoStatus(status);
       }
       // Continue looping til no wakeups occur.
-    } while (got_wakeup());
-    return {};
+      switch (GotActionDuringRun()) {
+        case ActionDuringRun::kNone:
+          return {};
+        case ActionDuringRun::kWakeup:
+          break;
+        case ActionDuringRun::kCancel:
+          MarkDone();
+          return absl::CancelledError();
+      }
+    }
   }
 
   using Promise = typename Factory::Promise;
+  // Scheduler for wakeups
+  GPR_NO_UNIQUE_ADDRESS WakeupScheduler wakeup_scheduler_;
+  // Callback on completion of the promise.
+  GPR_NO_UNIQUE_ADDRESS OnDone on_done_;
+  // Has execution completed?
+  GPR_NO_UNIQUE_ADDRESS bool done_ ABSL_GUARDED_BY(mu()) = false;
+  // Is there a wakeup scheduled?
+  GPR_NO_UNIQUE_ADDRESS std::atomic<bool> wakeup_scheduled_{false};
   // We wrap the promise in a union to allow control over the construction
   // simultaneously with annotating mutex requirements and noting that the
   // promise contained may not use any memory.
@@ -399,38 +516,24 @@ class PromiseActivity final
     ~PromiseHolder() {}
     GPR_NO_UNIQUE_ADDRESS Promise promise;
   };
-  GPR_NO_UNIQUE_ADDRESS PromiseHolder promise_holder_ ABSL_GUARDED_BY(mu_);
-  // Schedule callbacks on some external executor.
-  GPR_NO_UNIQUE_ADDRESS CallbackScheduler callback_scheduler_;
-  // Callback on completion of the promise.
-  GPR_NO_UNIQUE_ADDRESS OnDone on_done_;
-  // Has execution completed?
-  GPR_NO_UNIQUE_ADDRESS bool done_ ABSL_GUARDED_BY(mu_) = false;
+  GPR_NO_UNIQUE_ADDRESS PromiseHolder promise_holder_ ABSL_GUARDED_BY(mu());
 };
 
 }  // namespace promise_detail
 
 // Given a functor that returns a promise (a promise factory), a callback for
 // completion, and a callback scheduler, construct an activity.
-template <typename Factory, typename CallbackScheduler, typename OnDone,
+template <typename Factory, typename WakeupScheduler, typename OnDone,
           typename... Contexts>
 ActivityPtr MakeActivity(Factory promise_factory,
-                         CallbackScheduler callback_scheduler, OnDone on_done,
-                         Contexts... contexts) {
+                         WakeupScheduler wakeup_scheduler, OnDone on_done,
+                         Contexts&&... contexts) {
   return ActivityPtr(
-      new promise_detail::PromiseActivity<Factory, CallbackScheduler, OnDone,
+      new promise_detail::PromiseActivity<Factory, WakeupScheduler, OnDone,
                                           Contexts...>(
-          std::move(promise_factory), std::move(callback_scheduler),
-          std::move(on_done), std::move(contexts)...));
+          std::move(promise_factory), std::move(wakeup_scheduler),
+          std::move(on_done), std::forward<Contexts>(contexts)...));
 }
-
-// A callback scheduler that simply crashes
-struct NoCallbackScheduler {
-  template <typename F>
-  void operator()(F) {
-    abort();
-  }
-};
 
 }  // namespace grpc_core
 

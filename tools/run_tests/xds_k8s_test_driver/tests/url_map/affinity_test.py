@@ -12,14 +12,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import logging
-import time
 from typing import Tuple
 
 from absl import flags
 from absl.testing import absltest
 
-from framework import xds_k8s_flags
 from framework import xds_url_map_testcase
+from framework.helpers import skips
 from framework.infrastructure import traffic_director
 from framework.rpc import grpc_channelz
 from framework.test_app import client_app
@@ -56,8 +55,12 @@ _ChannelzChannelState = grpc_channelz.ChannelState
 class TestHeaderBasedAffinity(xds_url_map_testcase.XdsUrlMapTestCase):
 
     @staticmethod
-    def supported_clients() -> Tuple[str]:
-        return 'cpp', 'java'
+    def is_supported(config: skips.TestConfig) -> bool:
+        if config.client_lang in ['cpp', 'java']:
+            return config.version_ge('v1.40.x')
+        if config.client_lang in ['go']:
+            return config.version_ge('v1.41.x')
+        return False
 
     @staticmethod
     def client_init_config(rpc: str, metadata: str):
@@ -121,8 +124,12 @@ class TestHeaderBasedAffinityMultipleHeaders(
         xds_url_map_testcase.XdsUrlMapTestCase):
 
     @staticmethod
-    def supported_clients() -> Tuple[str]:
-        return 'cpp', 'java'
+    def is_supported(config: skips.TestConfig) -> bool:
+        if config.client_lang in ['cpp', 'java']:
+            return config.version_ge('v1.40.x')
+        if config.client_lang in ['go']:
+            return config.version_ge('v1.41.x')
+        return False
 
     @staticmethod
     def client_init_config(rpc: str, metadata: str):

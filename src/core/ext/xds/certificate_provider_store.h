@@ -74,7 +74,7 @@ class CertificateProviderStore
       store_->ReleaseCertificateProvider(key_, this);
     }
 
-    grpc_core::RefCountedPtr<grpc_tls_certificate_distributor> distributor()
+    RefCountedPtr<grpc_tls_certificate_distributor> distributor()
         const override {
       return certificate_provider_->distributor();
     }
@@ -82,6 +82,15 @@ class CertificateProviderStore
     grpc_pollset_set* interested_parties() const override {
       return certificate_provider_->interested_parties();
     }
+
+    int CompareImpl(const grpc_tls_certificate_provider* other) const override {
+      // TODO(yashykt): This should probably delegate to the `Compare` method of
+      // the wrapped certificate_provider_ object.
+      return QsortCompare(
+          static_cast<const grpc_tls_certificate_provider*>(this), other);
+    }
+
+    const char* type() const override;
 
     absl::string_view key() const { return key_; }
 

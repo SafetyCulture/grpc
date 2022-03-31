@@ -15,7 +15,7 @@
 #ifndef GRPC_CORE_EXT_TRANSPORT_BINDER_TRANSPORT_BINDER_STREAM_H
 #define GRPC_CORE_EXT_TRANSPORT_BINDER_TRANSPORT_BINDER_STREAM_H
 
-#include <grpc/impl/codegen/port_platform.h>
+#include <grpc/support/port_platform.h>
 
 #include "src/core/ext/transport/binder/transport/binder_transport.h"
 
@@ -41,6 +41,11 @@ struct RecvTrailingMetadataArgs {
   int status;
 };
 
+struct RegisterStreamArgs {
+  grpc_binder_stream* gbs;
+  grpc_binder_transport* gbt;
+};
+
 // TODO(mingcl): Figure out if we want to use class instead of struct here
 struct grpc_binder_stream {
   // server_data will be null for client, and for server it will be whatever
@@ -52,10 +57,8 @@ struct grpc_binder_stream {
         refcount(refcount),
         arena(arena),
         tx_code(tx_code),
-        is_client(is_client) {
-    // TODO(waynetu): Should this be protected?
-    t->registered_stream[tx_code] = this;
-
+        is_client(is_client),
+        is_closed(false) {
     recv_initial_metadata_args.gbs = this;
     recv_initial_metadata_args.gbt = t;
     recv_message_args.gbs = this;
@@ -79,8 +82,8 @@ struct grpc_binder_stream {
   grpc_core::Arena* arena;
   grpc_core::ManualConstructor<grpc_core::SliceBufferByteStream> sbs;
   int tx_code;
-  bool is_client;
-  bool is_closed = false;
+  const bool is_client;
+  bool is_closed;
 
   grpc_closure* destroy_stream_then_closure = nullptr;
   grpc_closure destroy_stream;
@@ -94,6 +97,9 @@ struct grpc_binder_stream {
   RecvMessageArgs recv_message_args;
   grpc_closure recv_trailing_metadata_closure;
   RecvTrailingMetadataArgs recv_trailing_metadata_args;
+
+  grpc_closure register_stream_closure;
+  RegisterStreamArgs register_stream_args;
 
   // We store these fields passed from op batch, in order to access them through
   // grpc_binder_stream

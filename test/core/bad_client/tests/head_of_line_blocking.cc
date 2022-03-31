@@ -99,7 +99,7 @@ size_t g_count = 0;
 
 static void addbuf(const void* data, size_t len) {
   if (g_count + len > g_cap) {
-    g_cap = GPR_MAX(g_count + len, g_cap * 2);
+    g_cap = std::max(g_count + len, g_cap * 2);
     g_buffer = static_cast<char*>(gpr_realloc(g_buffer, g_cap));
   }
   memcpy(g_buffer + g_count, data, len);
@@ -108,7 +108,7 @@ static void addbuf(const void* data, size_t len) {
 
 int main(int argc, char** argv) {
   int i;
-  grpc::testing::TestEnvironment env(argc, argv);
+  grpc::testing::TestEnvironment env(&argc, argv);
   grpc_init();
 
 #define NUM_FRAMES 10

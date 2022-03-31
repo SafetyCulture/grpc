@@ -27,6 +27,7 @@
 #include <grpc/support/time.h>
 
 #include "src/core/lib/gpr/useful.h"
+#include "src/core/lib/gprpp/time.h"
 #include "src/core/lib/slice/slice_internal.h"
 #include "test/core/util/test_config.h"
 
@@ -200,8 +201,8 @@ static void read_and_write_test(grpc_endpoint_test_config config,
   grpc_endpoint_test_fixture f =
       begin_test(config, "read_and_write_test", slice_size);
   grpc_core::ExecCtx exec_ctx;
-  grpc_millis deadline =
-      grpc_timespec_to_millis_round_up(grpc_timeout_seconds_to_deadline(20));
+  auto deadline = grpc_core::Timestamp::FromTimespecRoundUp(
+      grpc_timeout_seconds_to_deadline(20));
   gpr_log(GPR_DEBUG,
           "num_bytes=%" PRIuPTR " write_size=%" PRIuPTR " slice_size=%" PRIuPTR
           " shutdown=%d",
@@ -284,8 +285,8 @@ static void inc_on_failure(void* arg, grpc_error_handle error) {
 static void wait_for_fail_count(int* fail_count, int want_fail_count) {
   grpc_core::ExecCtx::Get()->Flush();
   gpr_mu_lock(g_mu);
-  grpc_millis deadline =
-      grpc_timespec_to_millis_round_up(grpc_timeout_seconds_to_deadline(10));
+  grpc_core::Timestamp deadline = grpc_core::Timestamp::FromTimespecRoundUp(
+      grpc_timeout_seconds_to_deadline(10));
   while (grpc_core::ExecCtx::Get()->Now() < deadline &&
          *fail_count < want_fail_count) {
     grpc_pollset_worker* worker = nullptr;
@@ -347,7 +348,7 @@ void grpc_endpoint_tests(grpc_endpoint_test_config config,
   read_and_write_test(config, 10000000, 100000, 8192, false);
   read_and_write_test(config, 1000000, 100000, 1, false);
   read_and_write_test(config, 100000000, 100000, 1, true);
-  for (i = 1; i < 1000; i = GPR_MAX(i + 1, i * 5 / 4)) {
+  for (i = 1; i < 1000; i = std::max(i + 1, i * 5 / 4)) {
     read_and_write_test(config, 40320, i, i, false);
   }
   g_pollset = nullptr;

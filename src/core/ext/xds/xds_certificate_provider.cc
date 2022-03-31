@@ -23,8 +23,6 @@
 #include "absl/functional/bind_front.h"
 #include "absl/strings/str_cat.h"
 
-#include "src/core/lib/gpr/useful.h"
-
 namespace grpc_core {
 
 namespace {
@@ -265,6 +263,8 @@ XdsCertificateProvider::~XdsCertificateProvider() {
   distributor_->SetWatchStatusCallback(nullptr);
 }
 
+const char* XdsCertificateProvider::type() const { return "Xds"; }
+
 bool XdsCertificateProvider::ProvidesRootCerts(const std::string& cert_name) {
   MutexLock lock(&mu_);
   auto it = certificate_state_map_.find(cert_name);
@@ -379,7 +379,9 @@ void XdsCertificateProviderArgDestroy(void* p) {
   xds_certificate_provider->Unref();
 }
 
-int XdsCertificateProviderArgCmp(void* p, void* q) { return GPR_ICMP(p, q); }
+int XdsCertificateProviderArgCmp(void* p, void* q) {
+  return QsortCompare(p, q);
+}
 
 const grpc_arg_pointer_vtable kChannelArgVtable = {
     XdsCertificateProviderArgCopy, XdsCertificateProviderArgDestroy,

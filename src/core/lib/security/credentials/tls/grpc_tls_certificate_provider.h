@@ -26,6 +26,7 @@
 
 #include <grpc/grpc_security.h>
 
+#include "src/core/lib/gpr/useful.h"
 #include "src/core/lib/gprpp/ref_counted.h"
 #include "src/core/lib/gprpp/ref_counted_ptr.h"
 #include "src/core/lib/gprpp/thd.h"
@@ -50,6 +51,36 @@ struct grpc_tls_certificate_provider
 
   virtual grpc_core::RefCountedPtr<grpc_tls_certificate_distributor>
   distributor() const = 0;
+
+  // Compares this grpc_tls_certificate_provider object with \a other.
+  // If this method returns 0, it means that gRPC can treat the two certificate
+  // providers as effectively the same. This method is used to compare
+  // `grpc_tls_certificate_provider` objects when they are present in
+  // channel_args. One important usage of this is when channel args are used in
+  // SubchannelKey, which leads to a useful property that allows subchannels to
+  // be reused when two different `grpc_tls_certificate_provider` objects are
+  // used but they compare as equal (assuming other channel args match).
+  int Compare(const grpc_tls_certificate_provider* other) const {
+    GPR_ASSERT(other != nullptr);
+    // Intentionally uses grpc_core::QsortCompare instead of strcmp as a safety
+    // against different grpc_tls_certificate_provider types using the same
+    // name.
+    int r = grpc_core::QsortCompare(type(), other->type());
+    if (r != 0) return r;
+    return CompareImpl(other);
+  }
+
+  // The pointer value \a type is used to uniquely identify a creds
+  // implementation for down-casting purposes. Every provider implementation
+  // should use a unique string instance, which should be returned by all
+  // instances of that provider implementation.
+  virtual const char* type() const = 0;
+
+ private:
+  // Implementation for `Compare` method intended to be overridden by
+  // subclasses. Only invoked if `type()` and `other->type()` point to the same
+  // string.
+  virtual int CompareImpl(const grpc_tls_certificate_provider* other) const = 0;
 };
 
 namespace grpc_core {
@@ -59,9 +90,8 @@ namespace grpc_core {
 class StaticDataCertificateProvider final
     : public grpc_tls_certificate_provider {
  public:
-  StaticDataCertificateProvider(
-      std::string root_certificate,
-      grpc_core::PemKeyCertPairList pem_key_cert_pairs);
+  StaticDataCertificateProvider(std::string root_certificate,
+                                PemKeyCertPairList pem_key_cert_pairs);
 
   ~StaticDataCertificateProvider() override;
 
@@ -69,16 +99,25 @@ class StaticDataCertificateProvider final
     return distributor_;
   }
 
+  const char* type() const override { return "StaticData"; }
+
  private:
   struct WatcherInfo {
     bool root_being_watched = false;
     bool identity_being_watched = false;
   };
+
+  int CompareImpl(const grpc_tls_certificate_provider* other) const override {
+    // TODO(yashykt): Maybe do something better here.
+    return QsortCompare(static_cast<const grpc_tls_certificate_provider*>(this),
+                        other);
+  }
+
   RefCountedPtr<grpc_tls_certificate_distributor> distributor_;
   std::string root_certificate_;
-  grpc_core::PemKeyCertPairList pem_key_cert_pairs_;
+  PemKeyCertPairList pem_key_cert_pairs_;
   // Guards members below.
-  grpc_core::Mutex mu_;
+  Mutex mu_;
   // Stores each cert_name we get from the distributor callback and its watcher
   // information.
   std::map<std::string, WatcherInfo> watcher_info_;
@@ -99,11 +138,20 @@ class FileWatcherCertificateProvider final
     return distributor_;
   }
 
+  const char* type() const override { return "FileWatcher"; }
+
  private:
   struct WatcherInfo {
     bool root_being_watched = false;
     bool identity_being_watched = false;
   };
+
+  int CompareImpl(const grpc_tls_certificate_provider* other) const override {
+    // TODO(yashykt): Maybe do something better here.
+    return QsortCompare(static_cast<const grpc_tls_certificate_provider*>(this),
+                        other);
+  }
+
   // Force an update from the file system regardless of the interval.
   void ForceUpdate();
   // Read the root certificates from files and update the distributor.
@@ -122,15 +170,15 @@ class FileWatcherCertificateProvider final
   unsigned int refresh_interval_sec_ = 0;
 
   RefCountedPtr<grpc_tls_certificate_distributor> distributor_;
-  grpc_core::Thread refresh_thread_;
+  Thread refresh_thread_;
   gpr_event shutdown_event_;
 
   // Guards members below.
-  grpc_core::Mutex mu_;
+  Mutex mu_;
   // The most-recent credential data. It will be empty if the most recent read
   // attempt failed.
   std::string root_certificate_ ABSL_GUARDED_BY(mu_);
-  grpc_core::PemKeyCertPairList pem_key_cert_pairs_ ABSL_GUARDED_BY(mu_);
+  PemKeyCertPairList pem_key_cert_pairs_ ABSL_GUARDED_BY(mu_);
   // Stores each cert_name we get from the distributor callback and its watcher
   // information.
   std::map<std::string, WatcherInfo> watcher_info_ ABSL_GUARDED_BY(mu_);

@@ -40,15 +40,15 @@ void pollset_shutdown(grpc_pollset* pollset, grpc_closure* closure) {
   grpc_core::ExecCtx::Run(DEBUG_LOCATION, closure, GRPC_ERROR_NONE);
 }
 void pollset_destroy(grpc_pollset* pollset) {}
-grpc_error* pollset_work(grpc_pollset* pollset, grpc_pollset_worker** worker,
-                         grpc_millis deadline) {
+grpc_error_handle pollset_work(grpc_pollset* pollset,
+                               grpc_pollset_worker** worker,
+                               grpc_core::Timestamp deadline) {
   (void)worker;
-  gpr_cv_wait(&g_cv, &g_mu,
-              grpc_millis_to_timespec(deadline, GPR_CLOCK_REALTIME));
+  gpr_cv_wait(&g_cv, &g_mu, deadline.as_timespec(GPR_CLOCK_REALTIME));
   return GRPC_ERROR_NONE;
 }
-grpc_error* pollset_kick(grpc_pollset* pollset,
-                         grpc_pollset_worker* specific_worker) {
+grpc_error_handle pollset_kick(grpc_pollset* pollset,
+                               grpc_pollset_worker* specific_worker) {
   (void)pollset;
   (void)specific_worker;
   return GRPC_ERROR_NONE;

@@ -12,12 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-load("//bazel:grpc_build_system.bzl", "grpc_cc_binary", "grpc_cc_library", "grpc_cc_test", "grpc_package")
+load("//bazel:grpc_build_system.bzl", "grpc_cc_library", "grpc_cc_test", "grpc_package")
 load("//bazel:custom_exec_properties.bzl", "LARGE_MACHINE")
 
-licenses(["notice"])  # Apache v2
-
-load("//test/core/util:grpc_fuzzer.bzl", "grpc_fuzzer")
+licenses(["notice"])
 
 grpc_package(
     name = "test/core/iomgr",
@@ -68,22 +66,14 @@ grpc_cc_test(
 grpc_cc_test(
     name = "error_test",
     srcs = ["error_test.cc"],
+    external_deps = [
+        "gtest",
+    ],
     language = "C++",
+    uses_event_engine = False,
     uses_polling = False,
     deps = [
         ":endpoint_tests",
-        "//:gpr",
-        "//:grpc",
-        "//test/core/util:grpc_test_util",
-    ],
-)
-
-grpc_cc_test(
-    name = "ev_epollex_linux_test",
-    srcs = ["ev_epollex_linux_test.cc"],
-    language = "C++",
-    tags = ["no_windows"],
-    deps = [
         "//:gpr",
         "//:grpc",
         "//test/core/util:grpc_test_util",
@@ -129,6 +119,7 @@ grpc_cc_test(
     name = "load_file_test",
     srcs = ["load_file_test.cc"],
     language = "C++",
+    uses_event_engine = False,
     uses_polling = False,
     deps = [
         "//:gpr",
@@ -159,6 +150,7 @@ grpc_cc_test(
     name = "mpmcqueue_test",
     srcs = ["mpmcqueue_test.cc"],
     language = "C++",
+    uses_event_engine = False,
     uses_polling = False,
     deps = [
         "//:gpr",
@@ -172,6 +164,9 @@ grpc_cc_test(
     srcs = ["resolve_address_posix_test.cc"],
     args = [
         "--resolver=ares",
+    ],
+    external_deps = [
+        "absl/strings",
     ],
     language = "C++",
     tags = ["no_windows"],
@@ -188,6 +183,9 @@ grpc_cc_test(
     args = [
         "--resolver=native",
     ],
+    external_deps = [
+        "absl/strings",
+    ],
     language = "C++",
     tags = ["no_windows"],
     deps = [
@@ -200,39 +198,34 @@ grpc_cc_test(
 grpc_cc_test(
     name = "resolve_address_using_ares_resolver_test",
     srcs = ["resolve_address_test.cc"],
-    args = [
-        "--resolver=ares",
+    external_deps = [
+        "absl/strings",
+        "gtest",
     ],
     language = "C++",
     deps = [
         "//:gpr",
         "//:grpc",
+        "//test/core/util:fake_udp_and_tcp_server",
         "//test/core/util:grpc_test_util",
+        "//test/cpp/util:test_config",
     ],
 )
 
 grpc_cc_test(
     name = "resolve_address_using_native_resolver_test",
     srcs = ["resolve_address_test.cc"],
-    args = [
-        "--resolver=native",
+    external_deps = [
+        "absl/strings",
+        "gtest",
     ],
     language = "C++",
     deps = [
         "//:gpr",
         "//:grpc",
+        "//test/core/util:fake_udp_and_tcp_server",
         "//test/core/util:grpc_test_util",
-    ],
-)
-
-grpc_cc_test(
-    name = "resource_quota_test",
-    srcs = ["resource_quota_test.cc"],
-    language = "C++",
-    deps = [
-        "//:gpr",
-        "//:grpc",
-        "//test/core/util:grpc_test_util",
+        "//test/cpp/util:test_config",
     ],
 )
 
@@ -303,6 +296,7 @@ grpc_cc_test(
     name = "threadpool_test",
     srcs = ["threadpool_test.cc"],
     language = "C++",
+    uses_event_engine = False,
     uses_polling = False,
     deps = [
         "//:gpr",
@@ -315,6 +309,7 @@ grpc_cc_test(
     name = "time_averaged_stats_test",
     srcs = ["time_averaged_stats_test.cc"],
     language = "C++",
+    uses_event_engine = False,
     uses_polling = False,
     deps = [
         "//:gpr",
@@ -327,6 +322,7 @@ grpc_cc_test(
     name = "timer_heap_test",
     srcs = ["timer_heap_test.cc"],
     language = "C++",
+    uses_event_engine = False,
     uses_polling = False,
     deps = [
         "//:gpr",
@@ -339,19 +335,8 @@ grpc_cc_test(
     name = "timer_list_test",
     srcs = ["timer_list_test.cc"],
     language = "C++",
+    uses_event_engine = False,
     uses_polling = False,
-    deps = [
-        "//:gpr",
-        "//:grpc",
-        "//test/core/util:grpc_test_util",
-    ],
-)
-
-grpc_cc_test(
-    name = "udp_server_test",
-    srcs = ["udp_server_test.cc"],
-    language = "C++",
-    tags = ["no_windows"],
     deps = [
         "//:gpr",
         "//:grpc",

@@ -6,7 +6,7 @@ def upb_deps():
     maybe(
         git_repository,
         name = "com_google_absl",
-        commit = "998805a4c79d5d7a771f7e5a8ee3cbbbcba04f94",
+        commit = "215105818dfde3174fe799600bb0f3cae233d0bf",
         remote = "https://github.com/abseil/abseil-cpp.git",
         shallow_since = "1583355457 -0500",
     )

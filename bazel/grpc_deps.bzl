@@ -215,9 +215,9 @@ def grpc_deps():
         http_archive(
             name = "com_google_protobuf",
             sha256 = "5c48b997e92a82ccc9a8c7f49eb863f9f179bd66557e6a2acb7c1b2dd04ef859",
-            strip_prefix = "protobuf-v3.28.0",
+            strip_prefix = "protobuf-v28.0",
             urls = [
-              "https://github.com/protocolbuffers/protobuf/archive/refs/tags/v3.28.0.tar.gz",
+              "https://github.com/protocolbuffers/protobuf/releases/download/v28.0/protobuf-28.0.tar.gz",
             ],
             patches = ["@com_github_grpc_grpc//third_party:protobuf.patch"],
             patch_args = ["-p1"],

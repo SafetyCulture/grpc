@@ -214,7 +214,7 @@ def grpc_deps():
     if "com_google_protobuf" not in native.existing_rules():
         http_archive(
             name = "com_google_protobuf",
-            sha256 = "5c48b997e92a82ccc9a8c7f49eb863f9f179bd66557e6a2acb7c1b2dd04ef859",
+            sha256 = "13e7749c30bc24af6ee93e092422f9dc08491c7097efa69461f88eb5f61805ce",
             strip_prefix = "protobuf-v28.0",
             urls = [
               "https://github.com/protocolbuffers/protobuf/releases/download/v28.0/protobuf-28.0.tar.gz",

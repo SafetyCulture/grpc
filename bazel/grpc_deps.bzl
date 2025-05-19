@@ -206,13 +206,9 @@ def grpc_deps():
     if "zlib" not in native.existing_rules():
         http_archive(
             name = "zlib",
-            build_file = "@com_github_grpc_grpc//third_party:zlib.BUILD",
-            sha256 = "6d4d6640ca3121620995ee255945161821218752b551a1a180f4215f7d124d45",
-            strip_prefix = "zlib-cacf7f1d4e3d44d871b605da3b647f07d718623f",
-            urls = [
-                "https://storage.googleapis.com/grpc-bazel-mirror/github.com/madler/zlib/archive/cacf7f1d4e3d44d871b605da3b647f07d718623f.tar.gz",
-                "https://github.com/madler/zlib/archive/cacf7f1d4e3d44d871b605da3b647f07d718623f.tar.gz",
-            ],
+            sha256 = "17e88863f3600672ab49182f217281b6fc4d3c762bde361935e436a95214d05c",
+            strip_prefix = "zlib-1.3.1",
+            urls = ["https://github.com/madler/zlib/archive/v1.3.1.tar.gz"],
         )
 
     if "com_google_protobuf" not in native.existing_rules():

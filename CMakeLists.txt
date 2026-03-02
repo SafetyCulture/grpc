@@ -1621,7 +1621,7 @@ endif()
 
 
 
-add_library(address_sorting
+add_library(address_sorting SHARED
   third_party/address_sorting/address_sorting.c
   third_party/address_sorting/address_sorting_posix.c
   third_party/address_sorting/address_sorting_windows.c
@@ -1674,7 +1674,7 @@ if(gRPC_INSTALL)
 endif()
 
 
-add_library(gpr
+add_library(gpr SHARED
   src/core/lib/config/config_vars.cc
   src/core/lib/config/config_vars_non_generated.cc
   src/core/lib/config/load_config.cc
@@ -4050,7 +4050,7 @@ endif()
 
 endif()
 
-add_library(grpc++
+add_library(grpc++ SHARED
   src/core/ext/transport/binder/client/binder_connector.cc
   src/core/ext/transport/binder/client/channel_create.cc
   src/core/ext/transport/binder/client/channel_create_impl.cc
@@ -4821,7 +4821,7 @@ target_link_libraries(grpc++_test_util
 
 endif()
 
-add_library(grpc++_unsecure
+add_library(grpc++_unsecure EXCLUDE_FROM_ALL
   src/cpp/client/call_credentials.cc
   src/cpp/client/channel_cc.cc
   src/cpp/client/channel_credentials.cc
@@ -5567,7 +5567,7 @@ if(gRPC_INSTALL)
 endif()
 
 
-add_library(grpc_plugin_support
+add_library(grpc_plugin_support EXCLUDE_FROM_ALL
   src/compiler/cpp_generator.cc
   src/compiler/csharp_generator.cc
   src/compiler/node_generator.cc

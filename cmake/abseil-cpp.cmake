@@ -25,6 +25,21 @@ elseif(gRPC_ABSL_PROVIDER STREQUAL "module")
       # Abseil will be installed along with gRPC for convenience.
       set(ABSL_ENABLE_INSTALL ON)
     endif()
+    # [EX-3143] On Apple/Clang, -Xarch_<arch> <flag> pairs must be passed as a
+    # single shell token to prevent CMake flag deduplication from separating them.
+    # Patch AbseilConfigureCopts.cmake to use the SHELL: prefix before abseil
+    # targets are configured. Fixed upstream in abseil lts_2024_07_22 (PR #1710).
+    if(APPLE AND CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+      set(_absl_copts_file "${ABSL_ROOT_DIR}/absl/copts/AbseilConfigureCopts.cmake")
+      if(EXISTS "${_absl_copts_file}")
+        file(READ "${_absl_copts_file}" _absl_copts_content)
+        string(REPLACE
+          "list(APPEND ABSL_RANDOM_RANDEN_COPTS \"-Xarch_\${_arch}\" \"\${_flag}\")"
+          "list(APPEND ABSL_RANDOM_RANDEN_COPTS \"SHELL:-Xarch_\${_arch} \${_flag}\")"
+          _absl_copts_content "${_absl_copts_content}")
+        file(WRITE "${_absl_copts_file}" "${_absl_copts_content}")
+      endif()
+    endif()
     add_subdirectory(${ABSL_ROOT_DIR} third_party/abseil-cpp)
   else()
     message(WARNING "gRPC_ABSL_PROVIDER is \"module\" but ABSL_ROOT_DIR is wrong")

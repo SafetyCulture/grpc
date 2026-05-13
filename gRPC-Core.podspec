@@ -28,9 +28,16 @@ Pod::Spec.new do |s|
   s.license  = 'Apache License, Version 2.0'
   s.authors  = { 'The gRPC contributors' => 'grpc-packages@google.com' }
 
+  # SafetyCulture fork (EX-3736): point `source` at this fork's
+  # crux-v1.65.x-ios-cfstream branch (which carries the GRPC_IOS_EVENT_ENGINE_CLIENT 0
+  # patch in include/grpc/support/port_platform.h) so the patched files are the ones
+  # CocoaPods actually consumes for the pod build. Without this override, `source` would
+  # fall back to upstream `grpc/grpc` at tag v#{version} -- and CocoaPods would download
+  # upstream's source for the pod build even when the Podfile pulls the podspec from this
+  # fork, silently dropping our patch on the floor.
   s.source = {
-    :git => 'https://github.com/grpc/grpc.git',
-    :tag => "v#{version}",
+    :git => 'https://github.com/SafetyCulture/grpc.git',
+    :branch => 'crux-v1.65.x-ios-cfstream',
     :submodules => true,
   }
 

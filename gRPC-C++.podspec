@@ -29,9 +29,13 @@ Pod::Spec.new do |s|
   s.license  = 'Apache License, Version 2.0'
   s.authors  = { 'The gRPC contributors' => 'grpc-packages@google.com' }
 
+  # SafetyCulture fork (EX-3736): point `source` at this fork's
+  # crux-v1.65.x-ios-cfstream branch -- matches the override in gRPC-Core.podspec.
+  # See the comment there for why this is necessary (otherwise CocoaPods downloads
+  # upstream gRPC for the pod build and silently drops our port_platform.h patch).
   s.source = {
-    :git => 'https://github.com/grpc/grpc.git',
-    :tag => "v#{version}",
+    :git => 'https://github.com/SafetyCulture/grpc.git',
+    :branch => 'crux-v1.65.x-ios-cfstream',
   }
 
   s.ios.deployment_target = '10.0'

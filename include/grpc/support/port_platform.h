@@ -272,8 +272,21 @@
 #define GPR_PLATFORM_STRING "ios"
 #define GPR_CPU_IPHONE 1
 #define GRPC_CFSTREAM 1
+/* SafetyCulture fork patch (EX-3736, branch crux-v1.65.x-ios-cfstream):
+ * keep chttp2 transport I/O on the *legacy* CFStream iomgr endpoint
+ * (src/core/lib/iomgr/endpoint_cfstream.cc + cfstream_handle.cc +
+ *  ev_apple.cc CFRunLoop poller) instead of the new CFEventEngine
+ * (src/core/lib/event_engine/cf_engine/*). The legacy iomgr's
+ * dedicated continuously-running CFRunLoop thread recovers from a
+ * post-READY half-open socket (iOS hands a freshly-relaunched process
+ * a TCP+TLS-complete-but-then-silently-dead socket ~1 in 5 times),
+ * which the new CFEventEngine evidently doesn't on iOS 18 -- the path
+ * stays READY and RPCs sit on their deadlines, producing a 30s-2min
+ * whole-app freeze in iAuditor. Verified on iPhone XS / iOS 18.7.1:
+ * 10 force-kill+reopen cycles, zero stalls (baseline ~1/5).
+ * Write-up: https://safetyculture.atlassian.net/wiki/spaces/~712020cc23dc6becb44e56a1731ffdcee1b016/pages/5649367225 */
 #ifndef GRPC_IOS_EVENT_ENGINE_CLIENT
-#define GRPC_IOS_EVENT_ENGINE_CLIENT 1
+#define GRPC_IOS_EVENT_ENGINE_CLIENT 0
 #endif /* GRPC_IOS_EVENT_ENGINE_CLIENT */
 /* the c-ares resolver isn't safe to enable on iOS */
 #define GRPC_ARES 0

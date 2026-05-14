@@ -197,6 +197,15 @@ Pod::Spec.new do |s|
   s.subspec 'Implementation' do |ss|
     ss.header_mappings_dir = '.'
     ss.libraries = 'z'
+    # SafetyCulture: cf_engine's nwconnection_endpoint uses Apple's
+    # Network.framework (nw_connection_*). Network.framework auto-links via
+    # clang module import, but we declare it explicitly so static builds
+    # and projects with disabled clang modules link successfully.
+    ss.ios.frameworks = 'Network'
+    ss.osx.frameworks = 'Network'
+    ss.tvos.frameworks = 'Network'
+    ss.watchos.frameworks = 'Network'
+    ss.visionos.frameworks = 'Network'
     ss.dependency "#{s.name}/Interface", version
     ss.dependency "#{s.name}/Privacy", version
     ss.dependency 'BoringSSL-GRPC', '0.0.36'
@@ -1253,6 +1262,8 @@ Pod::Spec.new do |s|
                       'src/core/lib/event_engine/cf_engine/cftype_unique_ref.h',
                       'src/core/lib/event_engine/cf_engine/dns_service_resolver.cc',
                       'src/core/lib/event_engine/cf_engine/dns_service_resolver.h',
+                      'src/core/lib/event_engine/cf_engine/nwconnection_endpoint.cc',
+                      'src/core/lib/event_engine/cf_engine/nwconnection_endpoint.h',
                       'src/core/lib/event_engine/channel_args_endpoint_config.cc',
                       'src/core/lib/event_engine/channel_args_endpoint_config.h',
                       'src/core/lib/event_engine/common_closures.h',
@@ -2945,6 +2956,7 @@ Pod::Spec.new do |s|
                               'src/core/lib/event_engine/cf_engine/cfstream_endpoint.h',
                               'src/core/lib/event_engine/cf_engine/cftype_unique_ref.h',
                               'src/core/lib/event_engine/cf_engine/dns_service_resolver.h',
+                              'src/core/lib/event_engine/cf_engine/nwconnection_endpoint.h',
                               'src/core/lib/event_engine/channel_args_endpoint_config.h',
                               'src/core/lib/event_engine/common_closures.h',
                               'src/core/lib/event_engine/default_event_engine.h',

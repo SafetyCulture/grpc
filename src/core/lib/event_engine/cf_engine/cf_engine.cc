@@ -27,6 +27,19 @@
 #include "src/core/lib/event_engine/cf_engine/cf_engine.h"
 #include "src/core/lib/event_engine/cf_engine/cfstream_endpoint.h"
 #include "src/core/lib/event_engine/cf_engine/dns_service_resolver.h"
+#include "src/core/lib/event_engine/cf_engine/nwconnection_endpoint.h"
+
+// SafetyCulture: select the endpoint backend at build time. Default on
+// (Network.framework) on iOS-class Apple targets, off otherwise.
+// To revert to the upstream CFStream-based endpoint at build time, pass
+// -DGRPC_CF_USE_NW_CONNECTION=0 to the compiler.
+#ifndef GRPC_CF_USE_NW_CONNECTION
+#ifdef AVAILABLE_MAC_OS_X_VERSION_10_14_AND_LATER
+#define GRPC_CF_USE_NW_CONNECTION 1
+#else
+#define GRPC_CF_USE_NW_CONNECTION 0
+#endif
+#endif
 #include "src/core/lib/event_engine/posix_engine/timer_manager.h"
 #include "src/core/lib/event_engine/tcp_socket_utils.h"
 #include "src/core/lib/event_engine/thread_pool/thread_pool.h"
@@ -36,6 +49,15 @@
 
 namespace grpc_event_engine {
 namespace experimental {
+
+// Endpoint backend selected at build time. The two implementations are
+// interface-compatible (same Connect / CancelConnect / Read / Write / address
+// surface), so the rest of CFEventEngine doesn't need to care.
+#if GRPC_CF_USE_NW_CONNECTION
+using CfEngineEndpoint = NWConnectionEndpoint;
+#else
+using CfEngineEndpoint = CFStreamEndpoint;
+#endif
 
 struct CFEventEngine::Closure final : public EventEngine::Closure {
   absl::AnyInvocable<void()> cb;
@@ -89,7 +111,7 @@ CFEventEngine::ConnectionHandle CFEventEngine::Connect(
     OnConnectCallback on_connect, const ResolvedAddress& addr,
     const EndpointConfig& /* args */, MemoryAllocator memory_allocator,
     Duration timeout) {
-  auto endpoint_ptr = new CFStreamEndpoint(
+  auto endpoint_ptr = new CfEngineEndpoint(
       std::static_pointer_cast<CFEventEngine>(shared_from_this()),
       std::move(memory_allocator));
 
@@ -118,7 +140,7 @@ CFEventEngine::ConnectionHandle CFEventEngine::Connect(
           that->conn_handles_.erase(handle);
         }
 
-        auto endpoint_ptr = reinterpret_cast<CFStreamEndpoint*>(handle.keys[0]);
+        auto endpoint_ptr = reinterpret_cast<CfEngineEndpoint*>(handle.keys[0]);
 
         if (!status.ok()) {
           on_connect(std::move(status));
@@ -154,7 +176,7 @@ bool CFEventEngine::CancelConnectInternal(ConnectionHandle handle,
 
   // keep the `conn_mu_` lock to prevent endpoint_ptr from being deleted
 
-  auto endpoint_ptr = reinterpret_cast<CFStreamEndpoint*>(handle.keys[0]);
+  auto endpoint_ptr = reinterpret_cast<CfEngineEndpoint*>(handle.keys[0]);
   return endpoint_ptr->CancelConnect(status);
 }
 

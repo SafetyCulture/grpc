@@ -815,6 +815,7 @@ libs:
   - src/core/lib/event_engine/cf_engine/cfstream_endpoint.h
   - src/core/lib/event_engine/cf_engine/cftype_unique_ref.h
   - src/core/lib/event_engine/cf_engine/dns_service_resolver.h
+  - src/core/lib/event_engine/cf_engine/nwconnection_endpoint.h
   - src/core/lib/event_engine/channel_args_endpoint_config.h
   - src/core/lib/event_engine/common_closures.h
   - src/core/lib/event_engine/default_event_engine.h
@@ -1668,6 +1669,7 @@ libs:
   - src/core/lib/event_engine/cf_engine/cf_engine.cc
   - src/core/lib/event_engine/cf_engine/cfstream_endpoint.cc
   - src/core/lib/event_engine/cf_engine/dns_service_resolver.cc
+  - src/core/lib/event_engine/cf_engine/nwconnection_endpoint.cc
   - src/core/lib/event_engine/channel_args_endpoint_config.cc
   - src/core/lib/event_engine/default_event_engine.cc
   - src/core/lib/event_engine/default_event_engine_factory.cc
@@ -2352,6 +2354,7 @@ libs:
   - src/core/lib/event_engine/cf_engine/cfstream_endpoint.h
   - src/core/lib/event_engine/cf_engine/cftype_unique_ref.h
   - src/core/lib/event_engine/cf_engine/dns_service_resolver.h
+  - src/core/lib/event_engine/cf_engine/nwconnection_endpoint.h
   - src/core/lib/event_engine/channel_args_endpoint_config.h
   - src/core/lib/event_engine/common_closures.h
   - src/core/lib/event_engine/default_event_engine.h
@@ -2821,6 +2824,7 @@ libs:
   - src/core/lib/event_engine/cf_engine/cf_engine.cc
   - src/core/lib/event_engine/cf_engine/cfstream_endpoint.cc
   - src/core/lib/event_engine/cf_engine/dns_service_resolver.cc
+  - src/core/lib/event_engine/cf_engine/nwconnection_endpoint.cc
   - src/core/lib/event_engine/channel_args_endpoint_config.cc
   - src/core/lib/event_engine/default_event_engine.cc
   - src/core/lib/event_engine/default_event_engine_factory.cc
@@ -4445,6 +4449,7 @@ libs:
   - src/core/lib/event_engine/cf_engine/cfstream_endpoint.h
   - src/core/lib/event_engine/cf_engine/cftype_unique_ref.h
   - src/core/lib/event_engine/cf_engine/dns_service_resolver.h
+  - src/core/lib/event_engine/cf_engine/nwconnection_endpoint.h
   - src/core/lib/event_engine/channel_args_endpoint_config.h
   - src/core/lib/event_engine/common_closures.h
   - src/core/lib/event_engine/default_event_engine.h
@@ -4792,6 +4797,7 @@ libs:
   - src/core/lib/event_engine/cf_engine/cf_engine.cc
   - src/core/lib/event_engine/cf_engine/cfstream_endpoint.cc
   - src/core/lib/event_engine/cf_engine/dns_service_resolver.cc
+  - src/core/lib/event_engine/cf_engine/nwconnection_endpoint.cc
   - src/core/lib/event_engine/channel_args_endpoint_config.cc
   - src/core/lib/event_engine/default_event_engine.cc
   - src/core/lib/event_engine/default_event_engine_factory.cc
@@ -6684,6 +6690,7 @@ targets:
   - src/core/lib/event_engine/cf_engine/cfstream_endpoint.h
   - src/core/lib/event_engine/cf_engine/cftype_unique_ref.h
   - src/core/lib/event_engine/cf_engine/dns_service_resolver.h
+  - src/core/lib/event_engine/cf_engine/nwconnection_endpoint.h
   - src/core/lib/event_engine/channel_args_endpoint_config.h
   - src/core/lib/event_engine/common_closures.h
   - src/core/lib/event_engine/default_event_engine.h
@@ -7000,6 +7007,7 @@ targets:
   - src/core/lib/event_engine/cf_engine/cf_engine.cc
   - src/core/lib/event_engine/cf_engine/cfstream_endpoint.cc
   - src/core/lib/event_engine/cf_engine/dns_service_resolver.cc
+  - src/core/lib/event_engine/cf_engine/nwconnection_endpoint.cc
   - src/core/lib/event_engine/channel_args_endpoint_config.cc
   - src/core/lib/event_engine/default_event_engine.cc
   - src/core/lib/event_engine/default_event_engine_factory.cc
@@ -12395,6 +12403,7 @@ targets:
   - src/core/lib/event_engine/cf_engine/cfstream_endpoint.h
   - src/core/lib/event_engine/cf_engine/cftype_unique_ref.h
   - src/core/lib/event_engine/cf_engine/dns_service_resolver.h
+  - src/core/lib/event_engine/cf_engine/nwconnection_endpoint.h
   - src/core/lib/event_engine/channel_args_endpoint_config.h
   - src/core/lib/event_engine/common_closures.h
   - src/core/lib/event_engine/default_event_engine.h
@@ -12712,6 +12721,7 @@ targets:
   - src/core/lib/event_engine/cf_engine/cf_engine.cc
   - src/core/lib/event_engine/cf_engine/cfstream_endpoint.cc
   - src/core/lib/event_engine/cf_engine/dns_service_resolver.cc
+  - src/core/lib/event_engine/cf_engine/nwconnection_endpoint.cc
   - src/core/lib/event_engine/channel_args_endpoint_config.cc
   - src/core/lib/event_engine/default_event_engine.cc
   - src/core/lib/event_engine/default_event_engine_factory.cc

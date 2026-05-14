@@ -300,15 +300,25 @@ void NWConnectionEndpointImpl::OnStateChanged(nw_connection_state_t state,
         status = absl::UnavailableError("nw_connection failed");
       }
       absl::AnyInvocable<void(absl::Status)> cb;
+      bool was_connected;
       {
         grpc_core::MutexLock lock(&connect_mu_);
         if (on_connect_ != nullptr) {
           cb = std::move(on_connect_);
         }
         shutdown_status_ = status;
+        was_connected = connected_;
       }
       if (cb) {
         cb(std::move(status));
+      }
+      // Post-connect failure: cancel the connection so NW.framework fires
+      // any in-flight nw_connection_receive/send completion blocks with
+      // errors. Without this, a Read/Write callback could sit forever on
+      // a dead connection and stall gRPC's transport. Pre-connect failure
+      // is already handled by the on_connect callback above.
+      if (was_connected && connection_ != nullptr) {
+        nw_connection_cancel(connection_);
       }
       return;
     }
@@ -318,6 +328,9 @@ void NWConnectionEndpointImpl::OnStateChanged(nw_connection_state_t state,
         grpc_core::MutexLock lock(&connect_mu_);
         if (on_connect_ != nullptr) {
           cb = std::move(on_connect_);
+        }
+        if (shutdown_status_.ok()) {
+          shutdown_status_ = absl::CancelledError("nw_connection cancelled");
         }
       }
       if (cb) {
@@ -384,6 +397,19 @@ bool NWConnectionEndpointImpl::Read(
         "NWConnectionEndpointImpl::Read: connection not established"));
     return false;
   }
+  // Short-circuit if the connection has already entered a known-failed or
+  // shutdown state. OnStateChanged records the failure in shutdown_status_;
+  // issuing nw_connection_receive against a dead connection may not deliver
+  // its completion block reliably, which would hang gRPC's read loop.
+  absl::Status known_failure;
+  {
+    grpc_core::MutexLock lock(&connect_mu_);
+    known_failure = shutdown_status_;
+  }
+  if (!known_failure.ok()) {
+    on_read(std::move(known_failure));
+    return false;
+  }
 
   auto self_ref = Ref();
   // `on_read` is a move-only AnyInvocable — wrap it in a shared_ptr so the
@@ -429,6 +455,18 @@ bool NWConnectionEndpointImpl::Write(
   if (connection_ == nullptr) {
     on_writable(absl::UnavailableError(
         "NWConnectionEndpointImpl::Write: connection not established"));
+    return false;
+  }
+  // Short-circuit if the connection has already entered a known-failed or
+  // shutdown state. Same reasoning as Read above — issuing nw_connection_send
+  // against a dead connection may not deliver its completion block.
+  absl::Status known_failure;
+  {
+    grpc_core::MutexLock lock(&connect_mu_);
+    known_failure = shutdown_status_;
+  }
+  if (!known_failure.ok()) {
+    on_writable(std::move(known_failure));
     return false;
   }
 

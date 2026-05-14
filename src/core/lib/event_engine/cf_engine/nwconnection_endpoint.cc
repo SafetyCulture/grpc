@@ -446,9 +446,17 @@ bool NWConnectionEndpointImpl::Write(
   auto callback = std::make_shared<absl::AnyInvocable<void(absl::Status)>>(
       std::move(on_writable));
 
+  // is_complete=false because gRPC multiplexes many HTTP/2 streams over a
+  // single TCP connection. is_complete=true would mark the outbound side
+  // as final and Network.framework would FIN after this send, killing all
+  // subsequent writes on this connection. Apple docs:
+  //   "Until a context is marked complete by passing true here, future
+  //    calls to nw_connection_send will allow expansion of an existing
+  //    context." (https://developer.apple.com/documentation/network/nw_connection_send)
+  // The endpoint stays writable until Shutdown() calls nw_connection_cancel.
   nw_connection_send(connection_, payload,
                      NW_CONNECTION_DEFAULT_MESSAGE_CONTEXT,
-                     /*is_complete=*/true, ^(nw_error_t error) {
+                     /*is_complete=*/false, ^(nw_error_t error) {
                        // Explicit reference so the ObjC block captures
                        // `self_ref` by value, keeping the impl alive until the
                        // send completion fires. Without this the block only

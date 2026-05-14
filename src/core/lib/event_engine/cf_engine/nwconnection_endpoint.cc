@@ -61,9 +61,10 @@ void AppendDispatchDataToSliceBuffer(dispatch_data_t content,
     return;
   }
   auto buffer_index = buffer->AppendIndexed(Slice(allocator.MakeSlice(total)));
-  auto out = internal::SliceCast<MutableSlice>(buffer->MutableSliceAt(buffer_index));
-  size_t written = 0;
-  uint8_t* dst = out.begin();
+  uint8_t* dst = internal::SliceCast<MutableSlice>(
+                     buffer->MutableSliceAt(buffer_index))
+                     .begin();
+  __block size_t written = 0;
   dispatch_data_apply(content, ^bool(dispatch_data_t /*region*/, size_t offset,
                                      const void* src, size_t size) {
     (void)offset;
